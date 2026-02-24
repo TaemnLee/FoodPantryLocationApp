@@ -1,0 +1,236 @@
+[
+  {
+    "id": "fpn-market-lmhs",
+    "name": "FPN Market at LMHS",
+    "street": "131 McMillen Dr",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "fpn-market-brice-st",
+    "name": "FPN Market on Brice St",
+    "street": "1025 Brice St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "seventh-day-adventist",
+    "name": "Seventh Day Adventist",
+    "street": "122 East Main St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "last-call-ministries",
+    "name": "Last Call Ministries",
+    "street": "310 Everett Ave",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "st-vincent-depaul-society",
+    "name": "St. Vincent DePaul Society",
+    "street": "135 Wilson St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "market-street-pantry",
+    "name": "Market Street Pantry",
+    "street": "37 1/2 South 4th St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "family-of-faith-church",
+    "name": "Family of Faith Church",
+    "street": "975 Mt. Vernon Rd",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "salvation-army-newark",
+    "name": "Salvation Army",
+    "street": "250 East Main St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "second-presbyterian-church",
+    "name": "Second Presbyterian Church",
+    "street": "42 East Church St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "newark-nazarene-church",
+    "name": "Newark Nazarene Church",
+    "street": "71 Mahlom St",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "christ-cornerstone-church",
+    "name": "Christ Cornerstone Church",
+    "street": "69 King Avenue",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "marne-church",
+    "name": "Marne Church",
+    "street": "1019 Licking Valley Rd",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "wright-memorial-methodist",
+    "name": "Wright Memorial Methodist",
+    "street": "735 Mt. Vernon Road",
+    "city": "Newark",
+    "state": "OH",
+    "zip": "43055",
+    "county": "Licking"
+  },
+  {
+    "id": "waters-edge-buckeye-lake",
+    "name": "Waters Edge/Buckeye Lake",
+    "street": "4894 Walnut Rd",
+    "city": "Buckeye Lake",
+    "state": "OH",
+    "zip": "43008",
+    "county": "Licking"
+  },
+  {
+    "id": "buckeye-lake-leads",
+    "name": "Buckeye Lake LEADS",
+    "street": "41 First St",
+    "city": "Buckeye Lake",
+    "state": "OH",
+    "zip": "43008",
+    "county": "Licking"
+  },
+  {
+    "id": "jacksontown-umc",
+    "name": "Jacksontown UMC",
+    "street": "9350 Jacksontown Rd",
+    "city": "Jacksontown",
+    "state": "OH",
+    "zip": "43030",
+    "county": "Licking"
+  },
+  {
+    "id": "pataskala-leads",
+    "name": "Pataskala LEADS",
+    "street": "12536 Adams Lane SW",
+    "city": "Pataskala",
+    "state": "OH",
+    "zip": "43062",
+    "county": "Licking"
+  },
+  {
+    "id": "pataskala-umc",
+    "name": "Pataskala UMC (April-Nov.)",
+    "street": "458 South Main St",
+    "city": "Pataskala",
+    "state": "OH",
+    "zip": "43062",
+    "county": "Licking"
+  },
+  {
+    "id": "kirkersville-umc",
+    "name": "Kirkersville UMC (March-Nov.)",
+    "street": "108 East Main St",
+    "city": "Kirkersville",
+    "state": "OH",
+    "zip": "43033",
+    "county": "Licking"
+  },
+  {
+    "id": "alexandria-umc",
+    "name": "Alexandria UMC (March-Nov)",
+    "street": "72 Church St",
+    "city": "Alexandria",
+    "state": "OH",
+    "zip": "43001",
+    "county": "Licking"
+  },
+  {
+    "id": "st-albans-fire-dept",
+    "name": "St. Alban's Fire Dept (Nov-March)",
+    "street": "25 East Main St",
+    "city": "Alexandria",
+    "state": "OH",
+    "zip": "43001",
+    "county": "Licking"
+  },
+  {
+    "id": "christ-ev-lutheran-church",
+    "name": "Christ Ev. Lutheran Church (Easter-Thanksgiving)",
+    "street": "732 Hebron Rd",
+    "city": "Hebron",
+    "state": "OH",
+    "zip": "43056",
+    "county": "Licking"
+  },
+  {
+    "id": "heath-fire-department",
+    "name": "Heath Fire Department (Thanksgiving-Easter)",
+    "street": "93 Heath Rd",
+    "city": "Heath",
+    "state": "OH",
+    "zip": "43056",
+    "county": "Licking"
+  },
+  {
+    "id": "croton-church-of-christ",
+    "name": "Croton Church of Christ",
+    "street": "40 S. Main St",
+    "city": "Croton",
+    "state": "OH",
+    "zip": "43013",
+    "county": "Licking"
+  },
+  {
+    "id": "johnstown-faithcare-pantry",
+    "name": "Johnstown/Faithcare Pantry",
+    "street": "140 Pratt St",
+    "city": "Johnstown",
+    "state": "OH",
+    "zip": "43031",
+    "county": "Licking"
+  },
+  {
+    "id": "utica-leads",
+    "name": "Utica LEADS",
+    "street": "308 North Main St",
+    "city": "Utica",
+    "state": "OH",
+    "zip": "43080",
+    "county": "Licking"
+  }
+]
