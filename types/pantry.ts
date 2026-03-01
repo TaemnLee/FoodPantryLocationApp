@@ -7,3 +7,8 @@ export type PantryLocationSeed = {
   zip: string;
   county: "Licking";
 };
+
+export type PantryLocation = PantryLocationSeed & {
+  latitude: number;
+  longitude: number;
+};

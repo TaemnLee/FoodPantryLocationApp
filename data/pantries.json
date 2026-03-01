@@ -6,7 +6,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0496472,
+    "longitude": -82.4532119
   },
   {
     "id": "fpn-market-brice-st",
@@ -15,7 +17,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0639319,
+    "longitude": -82.3620372
   },
   {
     "id": "seventh-day-adventist",
@@ -24,7 +28,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0595417,
+    "longitude": -82.39715869999999
   },
   {
     "id": "last-call-ministries",
@@ -33,7 +39,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0637824,
+    "longitude": -82.388187
   },
   {
     "id": "st-vincent-depaul-society",
@@ -42,7 +50,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0533492,
+    "longitude": -82.4096367
   },
   {
     "id": "market-street-pantry",
@@ -51,7 +61,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0558612,
+    "longitude": -82.4045768
   },
   {
     "id": "family-of-faith-church",
@@ -60,7 +72,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0833456,
+    "longitude": -82.4174149
   },
   {
     "id": "salvation-army-newark",
@@ -69,7 +83,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0600189,
+    "longitude": -82.3909504
   },
   {
     "id": "second-presbyterian-church",
@@ -78,7 +94,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0599151,
+    "longitude": -82.4020895
   },
   {
     "id": "newark-nazarene-church",
@@ -87,7 +105,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0509322,
+    "longitude": -82.42284420000001
   },
   {
     "id": "christ-cornerstone-church",
@@ -96,7 +116,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0658732,
+    "longitude": -82.42354639999999
   },
   {
     "id": "marne-church",
@@ -105,7 +127,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0716718,
+    "longitude": -82.2989861
   },
   {
     "id": "wright-memorial-methodist",
@@ -114,7 +138,9 @@
     "city": "Newark",
     "state": "OH",
     "zip": "43055",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0766704,
+    "longitude": -82.4155018
   },
   {
     "id": "waters-edge-buckeye-lake",
@@ -123,7 +149,9 @@
     "city": "Buckeye Lake",
     "state": "OH",
     "zip": "43008",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 39.9292001,
+    "longitude": -82.4872683
   },
   {
     "id": "buckeye-lake-leads",
@@ -132,7 +160,9 @@
     "city": "Buckeye Lake",
     "state": "OH",
     "zip": "43008",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 39.9328552,
+    "longitude": -82.4814306
   },
   {
     "id": "jacksontown-umc",
@@ -141,7 +171,9 @@
     "city": "Jacksontown",
     "state": "OH",
     "zip": "43030",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 39.9573264,
+    "longitude": -82.41485639999999
   },
   {
     "id": "pataskala-leads",
@@ -150,7 +182,9 @@
     "city": "Pataskala",
     "state": "OH",
     "zip": "43062",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 39.9980296,
+    "longitude": -82.7242199
   },
   {
     "id": "pataskala-umc",
@@ -159,7 +193,9 @@
     "city": "Pataskala",
     "state": "OH",
     "zip": "43062",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 39.9934682,
+    "longitude": -82.6747413
   },
   {
     "id": "kirkersville-umc",
@@ -168,7 +204,9 @@
     "city": "Kirkersville",
     "state": "OH",
     "zip": "43033",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 39.95940179999999,
+    "longitude": -82.598765
   },
   {
     "id": "alexandria-umc",
@@ -177,7 +215,9 @@
     "city": "Alexandria",
     "state": "OH",
     "zip": "43001",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.090535,
+    "longitude": -82.61336290000001
   },
   {
     "id": "st-albans-fire-dept",
@@ -186,7 +226,9 @@
     "city": "Alexandria",
     "state": "OH",
     "zip": "43001",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0883135,
+    "longitude": -82.61174729999999
   },
   {
     "id": "christ-ev-lutheran-church",
@@ -195,7 +237,9 @@
     "city": "Hebron",
     "state": "OH",
     "zip": "43056",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0318608,
+    "longitude": -82.43596199999999
   },
   {
     "id": "heath-fire-department",
@@ -204,7 +248,9 @@
     "city": "Heath",
     "state": "OH",
     "zip": "43056",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.0227893,
+    "longitude": -82.4483194
   },
   {
     "id": "croton-church-of-christ",
@@ -213,7 +259,9 @@
     "city": "Croton",
     "state": "OH",
     "zip": "43013",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.2382247,
+    "longitude": -82.6860318
   },
   {
     "id": "johnstown-faithcare-pantry",
@@ -222,7 +270,9 @@
     "city": "Johnstown",
     "state": "OH",
     "zip": "43031",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.1539156,
+    "longitude": -82.6816458
   },
   {
     "id": "utica-leads",
@@ -231,6 +281,8 @@
     "city": "Utica",
     "state": "OH",
     "zip": "43080",
-    "county": "Licking"
+    "county": "Licking",
+    "latitude": 40.238454,
+    "longitude": -82.4519868
   }
 ]

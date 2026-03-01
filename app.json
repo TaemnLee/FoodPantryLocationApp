@@ -12,6 +12,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.lcfpn.pantry",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -20,7 +21,7 @@
       },
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyCHYGzmrA5-HMIihRRHZh9X29G1x3bQ_54"
+          "apiKey": "AIzaSyCq_hK3VSOsjjQbj66XQBSUgiusw_IqZNQ"
         }
       },
       "edgeToEdgeEnabled": true,
