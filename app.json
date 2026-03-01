@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app shows your location on the map so you can find nearby food pantries."
+      }
     },
     "android": {
       "package": "com.lcfpn.pantry",
