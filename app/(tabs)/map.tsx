@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Keyboard,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -168,6 +169,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const markerRefs = useRef<Record<string, { showCallout?: () => void } | null>>({});
+  const [markerModalPantry, setMarkerModalPantry] = useState<PantryLocation | null>(null);
   const [userCoords, setUserCoords] = useState<UserCoords | null>(null);
   const [pantries, setPantries] = useState<PantryLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -301,6 +303,12 @@ export default function MapScreen() {
         showsMyLocationButton={!!userCoords}>
         {pantries.map((pantry) => {
           const { isOpen, closingTime, nextOpens } = getOpenStatus(pantry);
+          const statusText = isOpen
+            ? closingTime
+              ? `Open until ${closingTime}`
+              : "Open"
+            : nextOpens ?? "Closed";
+
           return (
             <Marker
               ref={(ref) => {
@@ -309,31 +317,35 @@ export default function MapScreen() {
               key={pantry.pantry_id}
               coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
               title={pantry.name}
+              description={Platform.OS === "ios" ? `${pantry.street}, ${pantry.city}` : undefined}
+              onPress={() => {
+                if (Platform.OS === "android") {
+                  setMarkerModalPantry(pantry);
+                }
+              }}
               onCalloutPress={() => openDirections(pantry)}>
-              <Callout tooltip>
-                <View style={[styles.callout, { backgroundColor: cardBg }]}>
-                  <Text style={[styles.calloutName, { color: cardText }]} numberOfLines={1}>
-                    {pantry.name}
-                  </Text>
-                  <Text style={[styles.calloutAddress, { color: cardMuted }]} numberOfLines={1}>
-                    {pantry.street}, {pantry.city}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.calloutStatus,
-                      { color: isOpen ? "#16a34a" : "#dc2626" },
-                    ]}>
-                    {isOpen
-                      ? closingTime
-                        ? `Open until ${closingTime}`
-                        : "Open"
-                      : nextOpens ?? "Closed"}
-                  </Text>
-                  <View style={styles.calloutDirectionsBtn}>
-                    <Text style={styles.calloutDirectionsBtnText}>Directions</Text>
+              {Platform.OS === "ios" && (
+                <Callout tooltip>
+                  <View style={[styles.callout, { backgroundColor: cardBg }]}>
+                    <Text style={[styles.calloutName, { color: cardText }]} numberOfLines={1}>
+                      {pantry.name}
+                    </Text>
+                    <Text style={[styles.calloutAddress, { color: cardMuted }]} numberOfLines={1}>
+                      {pantry.street}, {pantry.city}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.calloutStatus,
+                        { color: isOpen ? "#16a34a" : "#dc2626" },
+                      ]}>
+                      {statusText}
+                    </Text>
+                    <View style={styles.calloutDirectionsBtn}>
+                      <Text style={styles.calloutDirectionsBtnText}>Directions</Text>
+                    </View>
                   </View>
-                </View>
-              </Callout>
+                </Callout>
+              )}
             </Marker>
           );
         })}
@@ -441,6 +453,52 @@ export default function MapScreen() {
             setSearchFocused(false);
           }}
         />
+      )}
+
+      {Platform.OS === "android" && (
+        <Modal
+          visible={!!markerModalPantry}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMarkerModalPantry(null)}>
+          <Pressable
+            style={styles.markerModalOverlay}
+            onPress={() => setMarkerModalPantry(null)}>
+            {markerModalPantry && (() => {
+              const { isOpen, closingTime, nextOpens } = getOpenStatus(markerModalPantry);
+              const statusText = isOpen
+                ? closingTime ? `Open until ${closingTime}` : "Open"
+                : nextOpens ?? "Closed";
+              return (
+                <Pressable
+                  style={[styles.markerModalCard, { backgroundColor: cardBg }]}
+                  onPress={(e) => e.stopPropagation()}>
+                  <Text style={[styles.markerModalName, { color: cardText }]} numberOfLines={1}>
+                    {markerModalPantry.name}
+                  </Text>
+                  <Text style={[styles.markerModalAddress, { color: cardMuted }]} numberOfLines={1}>
+                    {markerModalPantry.street}, {markerModalPantry.city}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.markerModalStatus,
+                      { color: isOpen ? "#16a34a" : "#dc2626" },
+                    ]}>
+                    {statusText}
+                  </Text>
+                  <Pressable
+                    style={styles.markerModalDirectionsBtn}
+                    onPress={() => {
+                      openDirections(markerModalPantry);
+                      setMarkerModalPantry(null);
+                    }}>
+                    <Text style={styles.markerModalDirectionsBtnText}>Directions</Text>
+                  </Pressable>
+                </Pressable>
+              );
+            })()}
+          </Pressable>
+        </Modal>
       )}
     </View>
   );
@@ -619,6 +677,55 @@ const styles = StyleSheet.create({
   calloutDirectionsBtnText: {
     color: "#FFFFFF",
     fontSize: 15,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  markerModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  markerModalCard: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 14,
+    padding: 20,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  markerModalName: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  markerModalAddress: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  markerModalStatus: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 8,
+  },
+  markerModalDirectionsBtn: {
+    marginTop: 16,
+    backgroundColor: "#2563EB",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignSelf: "stretch",
+  },
+  markerModalDirectionsBtnText: {
+    color: "#FFFFFF",
+    fontSize: 16,
     fontWeight: "600",
     textAlign: "center",
   },
