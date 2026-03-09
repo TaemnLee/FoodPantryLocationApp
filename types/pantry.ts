@@ -1,14 +1,12 @@
-export type PantryLocationSeed = {
-  id: string;
+/** Row from Supabase pantry_location table */
+export type PantryLocation = {
+  pantry_id: string;
   name: string;
   street: string;
   city: string;
-  state: "OH";
+  state: string;
   zip: string;
-  county: "Licking";
-};
-
-export type PantryLocation = PantryLocationSeed & {
+  county: string;
   latitude: number;
   longitude: number;
 };

@@ -1,11 +1,15 @@
 import * as Location from "expo-location";
 import { useEffect, useMemo, useState } from "react";
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useThemeColor } from "@/hooks/use-theme-color";
+import { supabase } from "@/lib/supabase";
 import type { PantryLocation } from "@/types/pantry";
 
-const pantries = require("@/data/pantries.json") as PantryLocation[];
+/** Height reserved for map provider logo (Apple/Google) at bottom. Not exposed by SDK. */
+const MAP_LOGO_BOTTOM = 16;
 
 const LICKING_COUNTY_REGION: Region = {
   latitude: 40.08,
@@ -29,7 +33,30 @@ function distanceMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
 type UserCoords = { latitude: number; longitude: number };
 
 export default function MapScreen() {
+  const insets = useSafeAreaInsets();
   const [userCoords, setUserCoords] = useState<UserCoords | null>(null);
+  const [pantries, setPantries] = useState<PantryLocation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const cardBg = useThemeColor({}, "background");
+  const cardBottom = 16 + insets.bottom + MAP_LOGO_BOTTOM;
+  const cardText = useThemeColor({}, "text");
+  const cardMuted = useThemeColor({}, "icon");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("pantry_location").select("*");
+        if (error) {
+          console.error("Supabase error:", error);
+          return;
+        }
+        console.log("Pantries loaded:", data?.length ?? 0, data?.[0]);
+        setPantries(data ?? []);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
@@ -41,7 +68,7 @@ export default function MapScreen() {
   }, []);
 
   const nearest = useMemo(() => {
-    if (!userCoords) return null;
+    if (!userCoords || pantries.length === 0) return null;
     let closest = pantries[0];
     let minDist = distanceMiles(userCoords.latitude, userCoords.longitude, closest.latitude, closest.longitude);
     for (const pantry of pantries.slice(1)) {
@@ -52,7 +79,7 @@ export default function MapScreen() {
       }
     }
     return { pantry: closest, miles: minDist };
-  }, [userCoords]);
+  }, [userCoords, pantries]);
 
   function openDirections(pantry: PantryLocation) {
     const { latitude, longitude } = pantry;
@@ -61,6 +88,14 @@ export default function MapScreen() {
         ? `maps://?daddr=${latitude},${longitude}`
         : `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
     Linking.openURL(url);
+  }
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
   }
 
   return (
@@ -73,7 +108,7 @@ export default function MapScreen() {
         showsMyLocationButton={!!userCoords}>
         {pantries.map((pantry) => (
           <Marker
-            key={pantry.id}
+            key={pantry.pantry_id}
             coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
             title={pantry.name}
             description={`${pantry.street}, ${pantry.city}, ${pantry.state} ${pantry.zip}`}
@@ -82,16 +117,16 @@ export default function MapScreen() {
       </MapView>
 
       {nearest && (
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: cardBg, bottom: cardBottom }]}>
           <View style={styles.cardBody}>
-            <Text style={styles.cardLabel}>Nearest pantry</Text>
-            <Text style={styles.cardName} numberOfLines={1}>{nearest.pantry.name}</Text>
-            <Text style={styles.cardAddress} numberOfLines={1}>
+            <Text style={[styles.cardLabel, { color: cardMuted }]}>Nearest pantry</Text>
+            <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>{nearest.pantry.name}</Text>
+            <Text style={[styles.cardAddress, { color: cardMuted }]} numberOfLines={1}>
               {nearest.pantry.street}, {nearest.pantry.city}
             </Text>
           </View>
           <View style={styles.cardSide}>
-            <Text style={styles.cardDistance}>{nearest.miles.toFixed(1)} mi</Text>
+            <Text style={[styles.cardDistance, { color: cardText }]}>{nearest.miles.toFixed(1)} mi</Text>
             <Pressable
               style={styles.directionsBtn}
               onPress={() => openDirections(nearest.pantry)}>
@@ -108,15 +143,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  centered: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   map: {
     flex: 1,
   },
   card: {
     position: "absolute",
-    bottom: 16,
     left: 16,
     right: 16,
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 16,
     flexDirection: "row",
@@ -134,18 +171,15 @@ const styles = StyleSheet.create({
   cardLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#6B7280",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   cardName: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111827",
   },
   cardAddress: {
     fontSize: 13,
-    color: "#6B7280",
   },
   cardSide: {
     alignItems: "flex-end",
@@ -155,7 +189,6 @@ const styles = StyleSheet.create({
   cardDistance: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#111827",
   },
   directionsBtn: {
     backgroundColor: "#2563EB",
