@@ -1,4 +1,13 @@
-/** Row from Supabase pantry_location table */
+/** Row from Supabase pantry_op_hours table */
+export type PantryOpHours = {
+  pantry_id: string;
+  name: string;
+  weekday: string;
+  open_time: string;
+  close_time: string;
+};
+
+/** Row from Supabase pantry_location table (with optional joined hours) */
 export type PantryLocation = {
   pantry_id: string;
   name: string;
@@ -9,4 +18,5 @@ export type PantryLocation = {
   county: string;
   latitude: number;
   longitude: number;
+  pantry_op_hours?: PantryOpHours[];
 };

@@ -1,15 +1,134 @@
 import * as Location from "expo-location";
-import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Keyboard,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import MapView, { Callout, Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useThemeColor } from "@/hooks/use-theme-color";
 import { supabase } from "@/lib/supabase";
-import type { PantryLocation } from "@/types/pantry";
+import type { PantryLocation, PantryOpHours } from "@/types/pantry";
 
-/** Height reserved for map provider logo (Apple/Google) at bottom. Not exposed by SDK. */
-const MAP_LOGO_BOTTOM = 16;
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_ABBREV: Record<string, string> = {
+  sunday: "Sun",
+  monday: "Mon",
+  tuesday: "Tue",
+  wednesday: "Wed",
+  thursday: "Thu",
+  friday: "Fri",
+  saturday: "Sat",
+};
+
+function matchWeekday(h: PantryOpHours, day: string, dayIndex: number): boolean {
+  const w = String(h.weekday ?? "").toLowerCase().trim();
+  if (w === day) return true;
+  if (day.startsWith(w.slice(0, 3)) || w.startsWith(day.slice(0, 3))) return true;
+  const num = parseInt(w, 10);
+  if (!Number.isNaN(num) && num >= 0 && num <= 6) return num === dayIndex;
+  return false;
+}
+
+function getHoursForDay(pantry: PantryLocation, dayIndex: number): PantryOpHours[] {
+  const hours = pantry.pantry_op_hours;
+  if (!hours?.length) return [];
+  const day = WEEKDAYS[dayIndex];
+  const matches = hours.filter((h) => matchWeekday(h, day, dayIndex));
+  return matches.sort(
+    (a, b) => timeToMinutes(a.open_time) - timeToMinutes(b.open_time)
+  );
+}
+
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function formatTimeForDisplay(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  const hour = h ?? 0;
+  const min = m ?? 0;
+  const mm = min.toString().padStart(2, "0");
+  if (hour === 0) return `12:${mm} AM`;
+  if (hour < 12) return `${hour}:${mm} AM`;
+  if (hour === 12) return `12:${mm} PM`;
+  return `${hour - 12}:${mm} PM`;
+}
+
+function getOpenStatus(
+  pantry: PantryLocation
+): { isOpen: boolean; closingTime: string | null; nextOpens: string | null } {
+  const now = new Date();
+  const todayIndex = now.getDay();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const todaySessions = getHoursForDay(pantry, todayIndex);
+
+  for (const session of todaySessions) {
+    const openMins = timeToMinutes(session.open_time);
+    const closeMins = timeToMinutes(session.close_time);
+    if (nowMins >= openMins && nowMins < closeMins) {
+      return { isOpen: true, closingTime: formatTimeForDisplay(session.close_time), nextOpens: null };
+    }
+  }
+
+  for (const session of todaySessions) {
+    const openMins = timeToMinutes(session.open_time);
+    if (nowMins < openMins) {
+      return {
+        isOpen: false,
+        closingTime: null,
+        nextOpens: `Opens ${formatTimeForDisplay(session.open_time)}`,
+      };
+    }
+  }
+
+  for (let i = 1; i <= 7; i++) {
+    const dayIndex = (todayIndex + i) % 7;
+    const daySessions = getHoursForDay(pantry, dayIndex);
+    if (daySessions.length) {
+      const first = daySessions[0];
+      const dayAbbrev = WEEKDAY_ABBREV[WEEKDAYS[dayIndex]] ?? WEEKDAYS[dayIndex].slice(0, 3);
+      return {
+        isOpen: false,
+        closingTime: null,
+        nextOpens: `Opens ${formatTimeForDisplay(first.open_time)} ${dayAbbrev}`,
+      };
+    }
+  }
+
+  const hours = pantry.pantry_op_hours;
+  if (hours?.length) {
+    const first = hours[0];
+    const dayLabel = first.weekday ? ` ${String(first.weekday).slice(0, 3)}` : "";
+    return {
+      isOpen: false,
+      closingTime: null,
+      nextOpens: `Opens ${formatTimeForDisplay(first.open_time)}${dayLabel}`,
+    };
+  }
+
+  return { isOpen: false, closingTime: null, nextOpens: null };
+}
+
+function isOpenNow(pantry: PantryLocation): boolean {
+  return getOpenStatus(pantry).isOpen;
+}
+
+function opensLaterToday(pantry: PantryLocation): boolean {
+  const todaySessions = getHoursForDay(pantry, new Date().getDay());
+  const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+  return todaySessions.some((s) => timeToMinutes(s.open_time) > nowMins);
+}
 
 const LICKING_COUNTY_REGION: Region = {
   latitude: 40.08,
@@ -17,6 +136,19 @@ const LICKING_COUNTY_REGION: Region = {
   latitudeDelta: 0.5,
   longitudeDelta: 0.5,
 };
+
+function matchesSearch(pantry: PantryLocation, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const searchable = [
+    pantry.name,
+    pantry.street,
+    pantry.city,
+    pantry.state,
+    pantry.zip,
+  ].join(" ");
+  return searchable.toLowerCase().includes(q);
+}
 
 function distanceMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 3958.8;
@@ -34,24 +166,80 @@ type UserCoords = { latitude: number; longitude: number };
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const mapRef = useRef<MapView>(null);
+  const markerRefs = useRef<Record<string, { showCallout?: () => void } | null>>({});
   const [userCoords, setUserCoords] = useState<UserCoords | null>(null);
   const [pantries, setPantries] = useState<PantryLocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const cardBg = useThemeColor({}, "background");
-  const cardBottom = 16 + insets.bottom + MAP_LOGO_BOTTOM;
   const cardText = useThemeColor({}, "text");
   const cardMuted = useThemeColor({}, "icon");
+
+  const searchResults = useMemo(() => {
+    const filtered = pantries.filter((p) => matchesSearch(p, searchQuery));
+    if (userCoords) {
+      return [...filtered].sort(
+        (a, b) =>
+          distanceMiles(userCoords.latitude, userCoords.longitude, a.latitude, a.longitude) -
+          distanceMiles(userCoords.latitude, userCoords.longitude, b.latitude, b.longitude)
+      );
+    }
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  }, [pantries, searchQuery, userCoords]);
+
+  const showSearchDropdown = searchFocused;
+
+  const nearest = useMemo(() => {
+    if (!userCoords || pantries.length === 0) return null;
+    const dist = (p: PantryLocation) =>
+      distanceMiles(userCoords!.latitude, userCoords!.longitude, p.latitude, p.longitude);
+    const byDist = (a: PantryLocation, b: PantryLocation) => dist(a) - dist(b);
+
+    const openNow = pantries.filter(isOpenNow).sort(byDist);
+    if (openNow.length) {
+      const p = openNow[0];
+      return { pantry: p, miles: dist(p), label: "Nearest open now" as const };
+    }
+
+    const openToday = pantries.filter(opensLaterToday).sort(byDist);
+    if (openToday.length) {
+      const p = openToday[0];
+      return { pantry: p, miles: dist(p), label: "Nearest open today" as const };
+    }
+
+    const closest = pantries.reduce((a, b) => (dist(a) < dist(b) ? a : b));
+    return { pantry: closest, miles: dist(closest), label: "Nearest pantry" as const };
+  }, [userCoords, pantries]);
+
+  const displayPantry = nearest?.pantry ?? null;
+  const displayLabel = nearest?.label ?? "Nearest pantry";
+  const displayMiles =
+    displayPantry && userCoords
+      ? distanceMiles(userCoords.latitude, userCoords.longitude, displayPantry.latitude, displayPantry.longitude)
+      : null;
 
   useEffect(() => {
     (async () => {
       try {
-        const { data, error } = await supabase.from("pantry_location").select("*");
-        if (error) {
-          console.error("Supabase error:", error);
+        const [{ data: locations, error: locError }, { data: hours, error: hoursError }] = await Promise.all([
+          supabase.from("pantry_location").select("*"),
+          supabase.from("pantry_op_hours").select("*"),
+        ]);
+        if (locError) {
+          console.error("Supabase pantry_location error:", locError);
           return;
         }
-        console.log("Pantries loaded:", data?.length ?? 0, data?.[0]);
-        setPantries(data ?? []);
+        if (hoursError) {
+          console.warn("Supabase pantry_op_hours error (hours not loaded):", hoursError);
+        }
+        const allHours = hours ?? [];
+        const pantriesWithHours = (locations ?? []).map((p) => ({
+          ...p,
+          pantry_op_hours: allHours.filter((h) => String(h.pantry_id) === String(p.pantry_id)),
+        }));
+        setPantries(pantriesWithHours);
       } finally {
         setLoading(false);
       }
@@ -67,19 +255,23 @@ export default function MapScreen() {
     });
   }, []);
 
-  const nearest = useMemo(() => {
-    if (!userCoords || pantries.length === 0) return null;
-    let closest = pantries[0];
-    let minDist = distanceMiles(userCoords.latitude, userCoords.longitude, closest.latitude, closest.longitude);
-    for (const pantry of pantries.slice(1)) {
-      const d = distanceMiles(userCoords.latitude, userCoords.longitude, pantry.latitude, pantry.longitude);
-      if (d < minDist) {
-        minDist = d;
-        closest = pantry;
-      }
-    }
-    return { pantry: closest, miles: minDist };
-  }, [userCoords, pantries]);
+  function selectPantry(pantry: PantryLocation) {
+    Keyboard.dismiss();
+    setSearchFocused(false);
+    setSearchQuery("");
+    mapRef.current?.animateToRegion(
+      {
+        latitude: pantry.latitude,
+        longitude: pantry.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      500
+    );
+    setTimeout(() => {
+      markerRefs.current[pantry.pantry_id]?.showCallout?.();
+    }, 550);
+  }
 
   function openDirections(pantry: PantryLocation) {
     const { latitude, longitude } = pantry;
@@ -87,7 +279,7 @@ export default function MapScreen() {
       Platform.OS === "ios"
         ? `maps://?daddr=${latitude},${longitude}`
         : `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-    Linking.openURL(url);
+    Linking.openURL(url).catch((err) => console.warn("Could not open directions:", err));
   }
 
   if (loading) {
@@ -101,39 +293,154 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         style={styles.map}
         initialRegion={LICKING_COUNTY_REGION}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         showsUserLocation={!!userCoords}
         showsMyLocationButton={!!userCoords}>
-        {pantries.map((pantry) => (
-          <Marker
-            key={pantry.pantry_id}
-            coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
-            title={pantry.name}
-            description={`${pantry.street}, ${pantry.city}, ${pantry.state} ${pantry.zip}`}
-          />
-        ))}
+        {pantries.map((pantry) => {
+          const { isOpen, closingTime, nextOpens } = getOpenStatus(pantry);
+          return (
+            <Marker
+              ref={(ref) => {
+                markerRefs.current[pantry.pantry_id] = ref;
+              }}
+              key={pantry.pantry_id}
+              coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
+              title={pantry.name}
+              onCalloutPress={() => openDirections(pantry)}>
+              <Callout tooltip>
+                <View style={[styles.callout, { backgroundColor: cardBg }]}>
+                  <Text style={[styles.calloutName, { color: cardText }]} numberOfLines={1}>
+                    {pantry.name}
+                  </Text>
+                  <Text style={[styles.calloutAddress, { color: cardMuted }]} numberOfLines={1}>
+                    {pantry.street}, {pantry.city}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.calloutStatus,
+                      { color: isOpen ? "#16a34a" : "#dc2626" },
+                    ]}>
+                    {isOpen
+                      ? closingTime
+                        ? `Open until ${closingTime}`
+                        : "Open"
+                      : nextOpens ?? "Closed"}
+                  </Text>
+                  <View style={styles.calloutDirectionsBtn}>
+                    <Text style={styles.calloutDirectionsBtnText}>Directions</Text>
+                  </View>
+                </View>
+              </Callout>
+            </Marker>
+          );
+        })}
       </MapView>
 
-      {nearest && (
-        <View style={[styles.card, { backgroundColor: cardBg, bottom: cardBottom }]}>
-          <View style={styles.cardBody}>
-            <Text style={[styles.cardLabel, { color: cardMuted }]}>Nearest pantry</Text>
-            <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>{nearest.pantry.name}</Text>
-            <Text style={[styles.cardAddress, { color: cardMuted }]} numberOfLines={1}>
-              {nearest.pantry.street}, {nearest.pantry.city}
-            </Text>
+      <View style={[styles.searchContainer, { top: insets.top + 8 }]} pointerEvents="box-none">
+        <TextInput
+          style={[styles.searchInput, { backgroundColor: cardBg, color: cardText }]}
+          placeholder="Search pantry name or address"
+          placeholderTextColor={cardMuted}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          returnKeyType="search"
+        />
+        {showSearchDropdown ? (
+          <View style={[styles.searchDropdown, { backgroundColor: cardBg }]}>
+            <ScrollView
+              style={styles.searchResults}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled>
+              {searchResults.length === 0 ? (
+                <Text style={[styles.searchEmpty, { color: cardMuted }]}>
+                  No pantries found. Try a different search.
+                </Text>
+              ) : (
+                searchResults.map((pantry) => {
+                  const miles =
+                    userCoords &&
+                    distanceMiles(userCoords.latitude, userCoords.longitude, pantry.latitude, pantry.longitude);
+                  return (
+                    <Pressable
+                      key={pantry.pantry_id}
+                      style={({ pressed }) => [
+                        styles.searchResultItem,
+                        pressed && styles.searchResultItemPressed,
+                      ]}
+                      onPress={() => selectPantry(pantry)}>
+                      <View style={styles.searchResultContent}>
+                        <Text style={[styles.searchResultName, { color: cardText }]} numberOfLines={1}>
+                          {pantry.name}
+                        </Text>
+                        <Text style={[styles.searchResultAddress, { color: cardMuted }]} numberOfLines={1}>
+                          {pantry.street}, {pantry.city}
+                        </Text>
+                      </View>
+                      {miles != null && (
+                        <Text style={[styles.searchResultDistance, { color: cardMuted }]}>
+                          {miles.toFixed(1)} mi
+                        </Text>
+                      )}
+                    </Pressable>
+                  );
+                })
+              )}
+            </ScrollView>
           </View>
-          <View style={styles.cardSide}>
-            <Text style={[styles.cardDistance, { color: cardText }]}>{nearest.miles.toFixed(1)} mi</Text>
-            <Pressable
-              style={styles.directionsBtn}
-              onPress={() => openDirections(nearest.pantry)}>
-              <Text style={styles.directionsBtnText}>Directions</Text>
-            </Pressable>
-          </View>
-        </View>
+        ) : (
+          displayPantry && (() => {
+            const { isOpen, closingTime, nextOpens } = getOpenStatus(displayPantry);
+            const statusText = isOpen
+              ? closingTime
+                ? `Open until ${closingTime}`
+                : "Open"
+              : nextOpens ?? "Closed";
+            const statusColor = isOpen ? "#16a34a" : "#dc2626";
+            return (
+            <View style={[styles.card, styles.cardIntegrated, { backgroundColor: cardBg }]}>
+              <View style={styles.cardBody}>
+                <Text style={[styles.cardLabel, { color: cardMuted }]}>{displayLabel}</Text>
+                <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>
+                  {displayPantry.name}
+                </Text>
+                <Text style={[styles.cardAddress, { color: cardMuted }]} numberOfLines={1}>
+                  {displayPantry.street}, {displayPantry.city}
+                </Text>
+                <Text style={[styles.cardStatus, { color: statusColor }]}>
+                  {statusText}
+                </Text>
+              </View>
+              <View style={styles.cardSide}>
+                {displayMiles != null && (
+                  <Text style={[styles.cardDistance, { color: cardText }]}>
+                    {displayMiles.toFixed(1)} mi
+                  </Text>
+                )}
+                <Pressable
+                  style={styles.directionsBtn}
+                  onPress={() => openDirections(displayPantry)}>
+                  <Text style={styles.directionsBtnText}>Directions</Text>
+                </Pressable>
+              </View>
+            </View>
+            );
+          })()
+        )}
+      </View>
+
+      {showSearchDropdown && (
+        <Pressable
+          style={styles.searchOverlay}
+          onPress={() => {
+            Keyboard.dismiss();
+            setSearchFocused(false);
+          }}
+        />
       )}
     </View>
   );
@@ -151,9 +458,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   card: {
-    position: "absolute",
-    left: 16,
-    right: 16,
     borderRadius: 14,
     padding: 16,
     flexDirection: "row",
@@ -163,6 +467,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 8,
     elevation: 4,
+  },
+  cardIntegrated: {
+    marginTop: 8,
   },
   cardBody: {
     flex: 1,
@@ -180,6 +487,11 @@ const styles = StyleSheet.create({
   },
   cardAddress: {
     fontSize: 13,
+  },
+  cardStatus: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 4,
   },
   cardSide: {
     alignItems: "flex-end",
@@ -200,5 +512,114 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "600",
+  },
+  searchContainer: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    zIndex: 10,
+  },
+  searchInput: {
+    height: 48,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  searchDropdown: {
+    marginTop: 8,
+    borderRadius: 12,
+    maxHeight: 280,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  searchResults: {
+    maxHeight: 272,
+  },
+  searchResultItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(128,128,128,0.2)",
+  },
+  searchResultContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  searchResultItemPressed: {
+    opacity: 0.7,
+  },
+  searchResultName: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  searchResultAddress: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  searchResultDistance: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 12,
+  },
+  searchEmpty: {
+    padding: 20,
+    fontSize: 15,
+    textAlign: "center",
+  },
+  searchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 5,
+  },
+  callout: {
+    padding: 12,
+    minWidth: 160,
+    maxWidth: 240,
+    borderRadius: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+      },
+      android: { elevation: 6 },
+    }),
+  },
+  calloutName: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  calloutAddress: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  calloutStatus: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  calloutDirectionsBtn: {
+    marginTop: 10,
+    backgroundColor: "#2563EB",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignSelf: "stretch",
+  },
+  calloutDirectionsBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "600",
+    textAlign: "center",
   },
 });
