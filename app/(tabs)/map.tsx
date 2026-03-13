@@ -222,31 +222,73 @@ export default function MapScreen() {
       ? distanceMiles(userCoords.latitude, userCoords.longitude, displayPantry.latitude, displayPantry.longitude)
       : null;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [{ data: locations, error: locError }, { data: hours, error: hoursError }] = await Promise.all([
-          supabase.from("pantry_location").select("*"),
-          supabase.from("pantry_op_hours").select("*"),
-        ]);
-        if (locError) {
-          console.error("Supabase pantry_location error:", locError);
-          return;
-        }
-        if (hoursError) {
-          console.warn("Supabase pantry_op_hours error (hours not loaded):", hoursError);
-        }
-        const allHours = hours ?? [];
-        const pantriesWithHours = (locations ?? []).map((p) => ({
-          ...p,
-          pantry_op_hours: allHours.filter((h) => String(h.pantry_id) === String(p.pantry_id)),
-        }));
-        setPantries(pantriesWithHours);
-      } finally {
-        setLoading(false);
+async function fetchPantries() {
+  try {
+    const [{ data: locations, error: locError }, { data: hours, error: hoursError }] =
+      await Promise.all([
+        supabase.from("pantry_location").select("*"),
+        supabase.from("pantry_op_hours").select("*"),
+      ]);
+
+    if (locError) {
+      console.error("Supabase pantry_location error:", locError);
+      return;
+    }
+
+    if (hoursError) {
+      console.warn("Supabase pantry_op_hours error (hours not loaded):", hoursError);
+    }
+
+    const allHours = hours ?? [];
+
+    const pantriesWithHours = (locations ?? []).map((p) => ({
+      ...p,
+      pantry_op_hours: allHours.filter(
+        (h) => String(h.pantry_id) === String(p.pantry_id)
+      ),
+    }));
+
+    setPantries(pantriesWithHours);
+  } finally {
+    setLoading(false);
+  }
+}
+
+useEffect(() => {
+  fetchPantries();
+}, []);
+
+useEffect(() => {
+  const channel = supabase
+    .channel("pantry-realtime")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pantry_location",
+      },
+      () => {
+        fetchPantries();
       }
-    })();
-  }, []);
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pantry_op_hours",
+      },
+      () => {
+        fetchPantries();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, []);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
