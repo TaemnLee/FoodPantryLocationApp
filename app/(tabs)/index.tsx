@@ -24,7 +24,7 @@ export default function HomeScreen() {
         <View style={styles.stepContainer}>
           <ThemedText type="subtitle">Current Features</ThemedText>
           <ThemedText>- Pantry map tab with address-based markers</ThemedText>
-          <ThemedText>- Pantry address dataset from local `data/pantries.json`</ThemedText>
+          <ThemedText>- Pantry data powered by Supabase</ThemedText>
         </View>
         <View style={styles.stepContainer}>
           <ThemedText type="subtitle">Next</ThemedText>
