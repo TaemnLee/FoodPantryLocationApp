@@ -16,6 +16,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="admin/index" options={{ headerShown: false, presentation: 'card' }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

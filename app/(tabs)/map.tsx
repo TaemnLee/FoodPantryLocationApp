@@ -131,6 +131,15 @@ function opensLaterToday(pantry: PantryLocation): boolean {
   return todaySessions.some((s) => timeToMinutes(s.open_time) > nowMins);
 }
 
+const TIME_PRESETS = [
+  { label: "8 AM", value: "08:00" },
+  { label: "10 AM", value: "10:00" },
+  { label: "12 PM", value: "12:00" },
+  { label: "2 PM", value: "14:00" },
+  { label: "4 PM", value: "16:00" },
+  { label: "6 PM", value: "18:00" },
+];
+
 const LICKING_COUNTY_REGION: Region = {
   latitude: 40.08,
   longitude: -82.48,
@@ -175,12 +184,36 @@ export default function MapScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [filterOpenNow, setFilterOpenNow] = useState(false);
+  const [filterDay, setFilterDay] = useState<number | null>(null);
+  const [filterDayLabel, setFilterDayLabel] = useState<string | null>(null);
+  const [filterMaxMiles, setFilterMaxMiles] = useState<number | null>(null);
+  const [filterTime, setFilterTime] = useState<string | null>(null);
+  const [expandedFilter, setExpandedFilter] = useState<"day" | "distance" | "time" | null>(null);
   const cardBg = useThemeColor({}, "background");
   const cardText = useThemeColor({}, "text");
   const cardMuted = useThemeColor({}, "icon");
+  const chipBg = useThemeColor({ light: "#FFFFFF", dark: "#2C2F30" }, "background");
+  const chipBorderColor = useThemeColor({ light: "rgba(0,0,0,0.1)", dark: "rgba(255,255,255,0.15)" }, "background");
+  const chipStyle = { backgroundColor: chipBg, borderColor: chipBorderColor };
+  const chipTextStyle = { color: cardText };
 
   const searchResults = useMemo(() => {
-    const filtered = pantries.filter((p) => matchesSearch(p, searchQuery));
+    let filtered = pantries.filter((p) => matchesSearch(p, searchQuery));
+    if (filterOpenNow) filtered = filtered.filter(isOpenNow);
+    if (filterDay !== null) filtered = filtered.filter((p) => getHoursForDay(p, filterDay).length > 0);
+    if (filterTime !== null) {
+      const timeMins = timeToMinutes(filterTime);
+      filtered = filtered.filter((p) => {
+        const hours = filterDay !== null ? getHoursForDay(p, filterDay) : (p.pantry_op_hours ?? []);
+        return hours.some((h) => timeToMinutes(h.open_time) <= timeMins && timeMins < timeToMinutes(h.close_time));
+      });
+    }
+    if (filterMaxMiles !== null && userCoords) {
+      filtered = filtered.filter(
+        (p) => distanceMiles(userCoords.latitude, userCoords.longitude, p.latitude, p.longitude) <= filterMaxMiles
+      );
+    }
     if (userCoords) {
       return [...filtered].sort(
         (a, b) =>
@@ -189,7 +222,26 @@ export default function MapScreen() {
       );
     }
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-  }, [pantries, searchQuery, userCoords]);
+  }, [pantries, searchQuery, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles]);
+
+  const visiblePantries = useMemo(() => {
+    let filtered = [...pantries];
+    if (filterOpenNow) filtered = filtered.filter(isOpenNow);
+    if (filterDay !== null) filtered = filtered.filter((p) => getHoursForDay(p, filterDay).length > 0);
+    if (filterTime !== null) {
+      const timeMins = timeToMinutes(filterTime);
+      filtered = filtered.filter((p) => {
+        const hours = filterDay !== null ? getHoursForDay(p, filterDay) : (p.pantry_op_hours ?? []);
+        return hours.some((h) => timeToMinutes(h.open_time) <= timeMins && timeMins < timeToMinutes(h.close_time));
+      });
+    }
+    if (filterMaxMiles !== null && userCoords) {
+      filtered = filtered.filter(
+        (p) => distanceMiles(userCoords.latitude, userCoords.longitude, p.latitude, p.longitude) <= filterMaxMiles
+      );
+    }
+    return filtered;
+  }, [pantries, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles]);
 
   const showSearchDropdown = searchFocused;
 
@@ -342,8 +394,9 @@ useEffect(() => {
         initialRegion={LICKING_COUNTY_REGION}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         showsUserLocation={!!userCoords}
-        showsMyLocationButton={!!userCoords}>
-        {pantries.map((pantry) => {
+        showsMyLocationButton={!!userCoords}
+        mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
+        {visiblePantries.map((pantry) => {
           const { isOpen, closingTime, nextOpens } = getOpenStatus(pantry);
           const statusText = isOpen
             ? closingTime
@@ -404,7 +457,132 @@ useEffect(() => {
           onBlur={() => setSearchFocused(false)}
           returnKeyType="search"
         />
-        {showSearchDropdown ? (
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterRow}
+          contentContainerStyle={styles.filterRowContent}
+          keyboardShouldPersistTaps="handled">
+          <Pressable
+            style={[styles.filterChip, chipStyle, filterOpenNow && styles.filterChipActive]}
+            onPress={() => {
+              const next = !filterOpenNow;
+              setFilterOpenNow(next);
+              if (next) { setFilterDay(null); setFilterDayLabel(null); setFilterTime(null); }
+              setExpandedFilter(null);
+            }}>
+            <Text style={[styles.filterChipText, chipTextStyle, filterOpenNow && styles.filterChipTextActive]}>
+              Open Now
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.filterChip, chipStyle, (filterDay !== null || expandedFilter === "day") && styles.filterChipActive]}
+            onPress={() => setExpandedFilter(expandedFilter === "day" ? null : "day")}>
+            <Text style={[styles.filterChipText, chipTextStyle, (filterDay !== null || expandedFilter === "day") && styles.filterChipTextActive]}>
+              {filterDay !== null ? (filterDayLabel ?? WEEKDAY_ABBREV[WEEKDAYS[filterDay]]) : "Day"} ▾
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.filterChip, chipStyle, (filterTime !== null || expandedFilter === "time") && styles.filterChipActive]}
+            onPress={() => setExpandedFilter(expandedFilter === "time" ? null : "time")}>
+            <Text style={[styles.filterChipText, chipTextStyle, (filterTime !== null || expandedFilter === "time") && styles.filterChipTextActive]}>
+              {filterTime !== null ? (TIME_PRESETS.find((t) => t.value === filterTime)?.label ?? filterTime) : "Time"} ▾
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.filterChip,
+              chipStyle,
+              !userCoords && styles.filterChipDisabled,
+              (filterMaxMiles !== null || expandedFilter === "distance") && styles.filterChipActive,
+            ]}
+            disabled={!userCoords}
+            onPress={() => setExpandedFilter(expandedFilter === "distance" ? null : "distance")}>
+            <Text style={[styles.filterChipText, chipTextStyle, (filterMaxMiles !== null || expandedFilter === "distance") && styles.filterChipTextActive]}>
+              {filterMaxMiles !== null ? `${filterMaxMiles} mi` : "Distance"} ▾
+            </Text>
+          </Pressable>
+        </ScrollView>
+
+        {expandedFilter === "day" && (
+          <View style={[styles.filterPicker, { backgroundColor: cardBg }]}>
+            {[
+              { label: "Today", index: new Date().getDay() },
+              { label: "Tomorrow", index: (new Date().getDay() + 1) % 7 },
+              ...WEEKDAYS.map((day, i) => ({ label: WEEKDAY_ABBREV[day], index: i })),
+            ].map(({ label, index }) => {
+              const isActive = filterDay === index && filterDayLabel === label;
+              return (
+                <Pressable
+                  key={label}
+                  style={[styles.filterPickerChip, chipStyle, isActive && styles.filterChipActive]}
+                  onPress={() => {
+                    if (isActive) {
+                      setFilterDay(null);
+                      setFilterDayLabel(null);
+                    } else {
+                      setFilterDay(index);
+                      setFilterDayLabel(label);
+                      setFilterOpenNow(false);
+                    }
+                    setExpandedFilter(null);
+                  }}>
+                  <Text style={[styles.filterPickerChipText, chipTextStyle, isActive && styles.filterChipTextActive]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        {expandedFilter === "time" && (
+          <View style={[styles.filterPicker, { backgroundColor: cardBg }]}>
+            {TIME_PRESETS.map((preset) => (
+              <Pressable
+                key={preset.value}
+                style={[styles.filterPickerChip, chipStyle, filterTime === preset.value && styles.filterChipActive]}
+                onPress={() => {
+                  const next = filterTime === preset.value ? null : preset.value;
+                  setFilterTime(next);
+                  setFilterOpenNow(false);
+                  if (next !== null && filterDay === null) {
+                    setFilterDay(new Date().getDay());
+                    setFilterDayLabel("Today");
+                  }
+                  setExpandedFilter(null);
+                }}>
+                <Text style={[styles.filterPickerChipText, chipTextStyle, filterTime === preset.value && styles.filterChipTextActive]}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {expandedFilter === "distance" && (
+          <View style={[styles.filterPicker, { backgroundColor: cardBg }]}>
+            {[5, 10, 25, 50].map((miles) => (
+              <Pressable
+                key={miles}
+                style={[styles.filterPickerChip, chipStyle, filterMaxMiles === miles && styles.filterChipActive]}
+                onPress={() => {
+                  setFilterMaxMiles(filterMaxMiles === miles ? null : miles);
+                  setExpandedFilter(null);
+                }}>
+                <Text style={[styles.filterPickerChipText, chipTextStyle, filterMaxMiles === miles && styles.filterChipTextActive]}>
+                  {miles} mi
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {showSearchDropdown && (
           <View style={[styles.searchDropdown, { backgroundColor: cardBg }]}>
             <ScrollView
               style={styles.searchResults}
@@ -446,44 +624,6 @@ useEffect(() => {
               )}
             </ScrollView>
           </View>
-        ) : (
-          displayPantry && (() => {
-            const { isOpen, closingTime, nextOpens } = getOpenStatus(displayPantry);
-            const statusText = isOpen
-              ? closingTime
-                ? `Open until ${closingTime}`
-                : "Open"
-              : nextOpens ?? "Closed";
-            const statusColor = isOpen ? "#16a34a" : "#dc2626";
-            return (
-            <View style={[styles.card, styles.cardIntegrated, { backgroundColor: cardBg }]}>
-              <View style={styles.cardBody}>
-                <Text style={[styles.cardLabel, { color: cardMuted }]}>{displayLabel}</Text>
-                <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>
-                  {displayPantry.name}
-                </Text>
-                <Text style={[styles.cardAddress, { color: cardMuted }]} numberOfLines={1}>
-                  {displayPantry.street}, {displayPantry.city}
-                </Text>
-                <Text style={[styles.cardStatus, { color: statusColor }]}>
-                  {statusText}
-                </Text>
-              </View>
-              <View style={styles.cardSide}>
-                {displayMiles != null && (
-                  <Text style={[styles.cardDistance, { color: cardText }]}>
-                    {displayMiles.toFixed(1)} mi
-                  </Text>
-                )}
-                <Pressable
-                  style={styles.directionsBtn}
-                  onPress={() => openDirections(displayPantry)}>
-                  <Text style={styles.directionsBtnText}>Directions</Text>
-                </Pressable>
-              </View>
-            </View>
-            );
-          })()
         )}
       </View>
 
@@ -493,9 +633,42 @@ useEffect(() => {
           onPress={() => {
             Keyboard.dismiss();
             setSearchFocused(false);
+            setExpandedFilter(null);
           }}
         />
       )}
+
+      {!showSearchDropdown && displayPantry && (() => {
+        const { isOpen, closingTime, nextOpens } = getOpenStatus(displayPantry);
+        const statusText = isOpen
+          ? closingTime ? `Open until ${closingTime}` : "Open"
+          : nextOpens ?? "Closed";
+        const statusColor = isOpen ? "#16a34a" : "#dc2626";
+        return (
+          <View style={[styles.bottomCard, { bottom: 8, backgroundColor: cardBg }]}>
+            <View style={styles.cardBody}>
+              <Text style={[styles.cardLabel, { color: cardMuted }]}>{displayLabel}</Text>
+              <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>
+                {displayPantry.name}
+              </Text>
+              <Text style={[styles.cardAddress, { color: cardMuted }]} numberOfLines={1}>
+                {displayPantry.street}, {displayPantry.city}
+              </Text>
+              <Text style={[styles.cardStatus, { color: statusColor }]}>{statusText}</Text>
+            </View>
+            <View style={styles.cardSide}>
+              {displayMiles != null && (
+                <Text style={[styles.cardDistance, { color: cardText }]}>
+                  {displayMiles.toFixed(1)} mi
+                </Text>
+              )}
+              <Pressable style={styles.directionsBtn} onPress={() => openDirections(displayPantry)}>
+                <Text style={styles.directionsBtnText}>Directions</Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      })()}
 
       {Platform.OS === "android" && (
         <Modal
@@ -770,5 +943,83 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     textAlign: "center",
+  },
+  filterRow: {
+    marginTop: 8,
+  },
+  filterRowContent: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 2,
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  filterChip: {
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: "transparent",
+    backgroundColor: "transparent",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  filterChipActive: {
+    backgroundColor: "#2563EB",
+    borderColor: "#2563EB",
+  },
+  filterChipDisabled: {
+    opacity: 0.35,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "transparent",
+  },
+  filterChipTextActive: {
+    color: "#FFFFFF",
+  },
+  filterPicker: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  filterPickerChip: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  filterPickerChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "transparent",
+  },
+  bottomCard: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    zIndex: 10,
+    borderRadius: 14,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
   },
 });
