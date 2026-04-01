@@ -18,5 +18,6 @@ export type PantryLocation = {
   county: string;
   latitude: number;
   longitude: number;
+  service_type?: string;
   pantry_op_hours?: PantryOpHours[];
 };

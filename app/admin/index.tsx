@@ -1,20 +1,45 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable, Modal,
-  StyleSheet, ScrollView, Switch, ActivityIndicator,
+  StyleSheet, ScrollView, Switch, ActivityIndicator, Alert,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as ExpoCrypto from 'expo-crypto';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/lib/supabase';
-import type { PantryLocation, PantryOpHours } from '@/types/pantry';
+import type { PantryLocation } from '@/types/pantry';
+
+async function geocodeAddress(street: string, city: string, state: string, zip: string): Promise<{ lat: number; lng: number } | null> {
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.error('Geocoding: EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set');
+    return null;
+  }
+  const address = `${street}, ${city}, ${state} ${zip}`;
+  console.log('Geocoding address:', address);
+  const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`);
+  const data = await res.json();
+  console.log('Geocoding response status:', data.status, data.error_message ?? '');
+  if (data.status !== 'OK' || !data.results?.[0]?.geometry?.location) return null;
+  return data.results[0].geometry.location;
+}
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const WEEKDAY_ABBREV: Record<string, string> = {
   sunday: 'Sun', monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed',
   thursday: 'Thu', friday: 'Fri', saturday: 'Sat',
 };
+
+function getDayAbbrev(weekday: string): string {
+  const w = String(weekday).toLowerCase().trim();
+  if (WEEKDAY_ABBREV[w]) return WEEKDAY_ABBREV[w];
+  const num = parseInt(w, 10);
+  if (!isNaN(num) && num >= 0 && num <= 6) return WEEKDAY_ABBREV[WEEKDAYS[num]] ?? w;
+  const match = WEEKDAYS.find((d) => d.startsWith(w.slice(0, 3)) || w.startsWith(d.slice(0, 3)));
+  return match ? WEEKDAY_ABBREV[match] ?? w : w;
+}
 
 type FormHour = { weekday: string; open_time: string; close_time: string };
 type PantryForm = {
@@ -23,13 +48,14 @@ type PantryForm = {
   city: string;
   state: string;
   zip: string;
+  service_type: string;
   isClosed: boolean;
   hours: FormHour[];
 };
 
 const EMPTY_FORM: PantryForm = {
   name: '', street: '', city: '', state: 'OH', zip: '',
-  isClosed: false, hours: [],
+  service_type: '', isClosed: false, hours: [],
 };
 
 function pantryToForm(p: PantryLocation): PantryForm {
@@ -39,6 +65,7 @@ function pantryToForm(p: PantryLocation): PantryForm {
     city: p.city,
     state: p.state,
     zip: p.zip,
+    service_type: p.service_type ?? '',
     isClosed: false,
     hours: (p.pantry_op_hours ?? []).map((h) => ({
       weekday: h.weekday,
@@ -67,16 +94,33 @@ export default function AdminScreen() {
   const [editTarget, setEditTarget] = useState<PantryLocation | null>(null);
   const [form, setForm] = useState<PantryForm>(EMPTY_FORM);
   const [newHour, setNewHour] = useState<FormHour>({ weekday: 'monday', open_time: '09:00', close_time: '17:00' });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) router.replace('/');
+    });
+  }, []);
 
   useEffect(() => {
     (async () => {
-      const [{ data: locations }, { data: hours }] = await Promise.all([
+      const [{ data: locations, error: locError }, { data: hours, error: hoursError }, { data: mains }] = await Promise.all([
         supabase.from('pantry_location').select('*'),
         supabase.from('pantry_op_hours').select('*'),
+        supabase.from('pantry_main').select('pantry_id, service_type'),
       ]);
+      if (locError) {
+        console.error('Admin fetch error:', locError.message, locError.code);
+        Alert.alert('Failed to load pantries', locError.message);
+        setLoading(false);
+        return;
+      }
+      if (hoursError) console.warn('Hours fetch error:', hoursError.message);
       const allHours = hours ?? [];
+      const serviceTypeMap = Object.fromEntries((mains ?? []).map((m) => [String(m.pantry_id), m.service_type ?? '']));
       const merged = (locations ?? []).map((p) => ({
         ...p,
+        service_type: serviceTypeMap[String(p.pantry_id)] ?? '',
         pantry_op_hours: allHours.filter((h) => String(h.pantry_id) === String(p.pantry_id)),
       }));
       setPantries(merged);
@@ -118,9 +162,63 @@ export default function AdminScreen() {
     setForm((f) => ({ ...f, hours: f.hours.filter((_, i) => i !== index) }));
   }
 
-  function handleSave() {
-    // Backend integration to be wired up later
-    closeForm();
+  async function handleSave() {
+    if (!form.name.trim()) { Alert.alert('Missing field', 'Name is required.'); return; }
+    setSaving(true);
+    try {
+      if (isAdding) {
+        const coords = await geocodeAddress(form.street, form.city, form.state, form.zip);
+        if (!coords) { Alert.alert('Geocoding failed', 'Could not find coordinates for this address. Check the address and try again.'); return; }
+        const pantry_id = ExpoCrypto.randomUUID();
+        const { error: mainErr } = await supabase.from('pantry_main').insert({
+          pantry_id, name: form.name, service_type: form.service_type,
+        });
+        if (mainErr) { Alert.alert('Error', mainErr.message); return; }
+        const { error: insertErr } = await supabase.from('pantry_location').insert({
+          pantry_id, name: form.name, street: form.street, city: form.city,
+          state: form.state, zip: form.zip, county: 'Licking',
+          latitude: coords.lat, longitude: coords.lng,
+        });
+        if (insertErr) { Alert.alert('Error', insertErr.message); return; }
+        if (form.hours.length > 0) {
+          await supabase.from('pantry_op_hours').insert(
+            form.hours.map((h) => ({ pantry_id, name: form.name, weekday: h.weekday, open_time: h.open_time, close_time: h.close_time }))
+          );
+        }
+        const newPantry: PantryLocation = {
+          pantry_id, name: form.name, street: form.street, city: form.city,
+          state: form.state, zip: form.zip, county: 'Licking',
+          service_type: form.service_type,
+          latitude: coords.lat, longitude: coords.lng,
+          pantry_op_hours: form.hours.map((h) => ({ ...h, pantry_id, name: form.name })),
+        };
+        setPantries((prev) => [...prev, newPantry]);
+      } else {
+        const id = editTarget!.pantry_id;
+        await supabase.from('pantry_main').update({
+          name: form.name, service_type: form.service_type,
+        }).eq('pantry_id', id);
+        const { error: updateErr } = await supabase.from('pantry_location').update({
+          name: form.name, street: form.street, city: form.city,
+          state: form.state, zip: form.zip,
+        }).eq('pantry_id', id);
+        if (updateErr) { Alert.alert('Error', updateErr.message); return; }
+        await supabase.from('pantry_op_hours').delete().eq('pantry_id', id);
+        if (form.hours.length > 0) {
+          await supabase.from('pantry_op_hours').insert(
+            form.hours.map((h) => ({ pantry_id: id, name: form.name, weekday: h.weekday, open_time: h.open_time, close_time: h.close_time }))
+          );
+        }
+        setPantries((prev) => prev.map((p) =>
+          p.pantry_id === id
+            ? { ...p, name: form.name, street: form.street, city: form.city, state: form.state, zip: form.zip, pantry_op_hours: form.hours.map((h) => ({ ...h, pantry_id: id, name: form.name })) }
+            : p
+        ));
+      }
+      closeForm();
+    } finally {
+      setSaving(false);
+    }
   }
 
   const isAdding = editTarget === null;
@@ -133,7 +231,10 @@ export default function AdminScreen() {
           <Text style={[styles.backBtnText, { color: '#2563EB' }]}>← Back</Text>
         </Pressable>
         <Text style={[styles.headerTitle, { color: textColor }]}>Admin Panel</Text>
-        <Pressable style={styles.signOutBtn} onPress={() => router.back()}>
+        <Pressable style={styles.signOutBtn} onPress={async () => {
+          await supabase.auth.signOut();
+          router.back();
+        }}>
           <Text style={styles.signOutText}>Sign Out</Text>
         </Pressable>
       </View>
@@ -211,8 +312,10 @@ export default function AdminScreen() {
               <Text style={[styles.modalTitle, { color: textColor }]}>
                 {isAdding ? 'New Pantry' : 'Edit Pantry'}
               </Text>
-              <Pressable onPress={handleSave}>
-                <Text style={styles.modalSave}>Save</Text>
+              <Pressable onPress={handleSave} disabled={saving}>
+                <Text style={[styles.modalSave, saving && { opacity: 0.4 }]}>
+                  {saving ? 'Saving…' : 'Save'}
+                </Text>
               </Pressable>
             </View>
 
@@ -227,30 +330,31 @@ export default function AdminScreen() {
                 <FormField label="Name" value={form.name}
                   onChangeText={(v) => setForm((f) => ({ ...f, name: v }))}
                   placeholder="Pantry name"
-                  textColor={textColor} mutedColor={mutedColor}
-                  inputBg={inputBg} borderColor={borderColor} isLast={false} />
+                  textColor={textColor} mutedColor={mutedColor} />
+                <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
+                <FormField label="Type" value={form.service_type}
+                  onChangeText={(v) => setForm((f) => ({ ...f, service_type: v }))}
+                  placeholder="e.g. Food Pantry, Meal Site"
+                  textColor={textColor} mutedColor={mutedColor} />
                 <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
                 <FormField label="Street" value={form.street}
                   onChangeText={(v) => setForm((f) => ({ ...f, street: v }))}
                   placeholder="123 Main St"
-                  textColor={textColor} mutedColor={mutedColor}
-                  inputBg={inputBg} borderColor={borderColor} isLast={false} />
+                  textColor={textColor} mutedColor={mutedColor} />
                 <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
                 <View style={styles.rowFields}>
                   <View style={{ flex: 2 }}>
                     <FormField label="City" value={form.city}
                       onChangeText={(v) => setForm((f) => ({ ...f, city: v }))}
                       placeholder="Newark"
-                      textColor={textColor} mutedColor={mutedColor}
-                      inputBg={inputBg} borderColor={borderColor} isLast={true} />
+                      textColor={textColor} mutedColor={mutedColor} />
                   </View>
                   <View style={[styles.colDivider, { backgroundColor: borderColor }]} />
                   <View style={{ flex: 1 }}>
                     <FormField label="State" value={form.state}
                       onChangeText={(v) => setForm((f) => ({ ...f, state: v }))}
                       placeholder="OH"
-                      textColor={textColor} mutedColor={mutedColor}
-                      inputBg={inputBg} borderColor={borderColor} isLast={true} />
+                      textColor={textColor} mutedColor={mutedColor} />
                   </View>
                   <View style={[styles.colDivider, { backgroundColor: borderColor }]} />
                   <View style={{ flex: 1 }}>
@@ -258,7 +362,6 @@ export default function AdminScreen() {
                       onChangeText={(v) => setForm((f) => ({ ...f, zip: v }))}
                       placeholder="43055"
                       textColor={textColor} mutedColor={mutedColor}
-                      inputBg={inputBg} borderColor={borderColor} isLast={true}
                       keyboardType="numeric" />
                   </View>
                 </View>
@@ -294,7 +397,7 @@ export default function AdminScreen() {
                       {i > 0 && <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />}
                       <View style={styles.hourRow}>
                         <Text style={[styles.hourDay, { color: textColor }]}>
-                          {WEEKDAY_ABBREV[h.weekday] ?? h.weekday}
+                          {getDayAbbrev(h.weekday)}
                         </Text>
                         <Text style={[styles.hourTime, { color: mutedColor }]}>
                           {h.open_time} – {h.close_time}
@@ -380,12 +483,10 @@ export default function AdminScreen() {
 
 function FormField({
   label, value, onChangeText, placeholder,
-  textColor, mutedColor, inputBg, borderColor,
-  isLast, keyboardType,
+  textColor, mutedColor, keyboardType,
 }: {
   label: string; value: string; onChangeText: (v: string) => void;
   placeholder: string; textColor: string; mutedColor: string;
-  inputBg: string; borderColor: string; isLast: boolean;
   keyboardType?: 'default' | 'numeric' | 'email-address';
 }) {
   return (
@@ -538,7 +639,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 10,
   },
-  hourDay: { fontSize: 14, fontWeight: '600', width: 36 },
+  hourDay: { fontSize: 14, fontWeight: '600', width: 52 },
   hourTime: { flex: 1, fontSize: 14 },
   removeHourBtn: { padding: 4 },
   removeHourBtnText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },

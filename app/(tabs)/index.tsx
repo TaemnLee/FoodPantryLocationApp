@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -20,14 +21,19 @@ export default function HomeScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     supabase
       .from('pantry_location')
       .select('*', { count: 'exact', head: true })
       .then(({ count }) => { if (count !== null) setPantryCount(count); });
-  }, []);
+  }, []));
 
-  function handleSignIn() {
+  async function handleSignIn() {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      Alert.alert('Sign In Failed', error.message);
+      return;
+    }
     setShowSignIn(false);
     setEmail('');
     setPassword('');
@@ -81,7 +87,14 @@ export default function HomeScreen() {
           <Text style={[styles.ctaArrow, { color: mutedColor }]}>↓</Text>
         </View>
 
-        <Pressable style={styles.adminLink} onPress={() => setShowSignIn(true)}>
+        <Pressable style={styles.adminLink} onPress={async () => {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            router.push('/admin');
+          } else {
+            setShowSignIn(true);
+          }
+        }}>
           <Text style={[styles.adminLinkText, { color: mutedColor }]}>Admin</Text>
         </Pressable>
       </View>
