@@ -95,6 +95,7 @@ export default function AdminScreen() {
   const [form, setForm] = useState<PantryForm>(EMPTY_FORM);
   const [newHour, setNewHour] = useState<FormHour>({ weekday: 'monday', open_time: '09:00', close_time: '17:00' });
   const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -160,6 +161,22 @@ export default function AdminScreen() {
 
   function removeHourSlot(index: number) {
     setForm((f) => ({ ...f, hours: f.hours.filter((_, i) => i !== index) }));
+  }
+
+  async function handleDelete() {
+    if (!editTarget) return;
+    const id = editTarget.pantry_id;
+    setSaving(true);
+    try {
+      await supabase.from('pantry_op_hours').delete().eq('pantry_id', id);
+      await supabase.from('pantry_location').delete().eq('pantry_id', id);
+      await supabase.from('pantry_main').delete().eq('pantry_id', id);
+      setPantries((prev) => prev.filter((p) => p.pantry_id !== id));
+      setShowDeleteConfirm(false);
+      closeForm();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSave() {
@@ -469,12 +486,36 @@ export default function AdminScreen() {
               {!isAdding && (
                 <Pressable
                   style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.8 }]}
-                  onPress={closeForm}>
+                  onPress={() => setShowDeleteConfirm(true)}>
                   <Text style={styles.deleteBtnText}>Delete Pantry</Text>
                 </Pressable>
               )}
             </ScrollView>
           </KeyboardAvoidingView>
+          {/* Delete Confirmation */}
+          {showDeleteConfirm && (
+            <Pressable style={styles.confirmOverlay} onPress={() => setShowDeleteConfirm(false)}>
+              <Pressable style={[styles.confirmCard, { backgroundColor: bg, borderColor }]} onPress={() => {}}>
+                <Text style={[styles.confirmTitle, { color: textColor }]}>Delete Pantry?</Text>
+                <Text style={[styles.confirmBody, { color: mutedColor }]}>
+                  {editTarget?.name} will be permanently removed. This cannot be undone.
+                </Text>
+                <View style={[styles.confirmDivider, { backgroundColor: borderColor }]} />
+                <Pressable
+                  style={({ pressed }) => [styles.confirmDeleteBtn, pressed && { opacity: 0.8 }]}
+                  onPress={handleDelete}
+                  disabled={saving}>
+                  <Text style={styles.confirmDeleteText}>{saving ? 'Deleting…' : 'Delete'}</Text>
+                </Pressable>
+                <View style={[styles.confirmDivider, { backgroundColor: borderColor }]} />
+                <Pressable
+                  style={({ pressed }) => [styles.confirmCancelBtn, pressed && { opacity: 0.7 }]}
+                  onPress={() => setShowDeleteConfirm(false)}>
+                  <Text style={[styles.confirmCancelText, { color: textColor }]}>Cancel</Text>
+                </Pressable>
+              </Pressable>
+            </Pressable>
+          )}
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -702,4 +743,46 @@ const styles = StyleSheet.create({
     borderColor: '#FECACA',
   },
   deleteBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 16 },
+
+  // Delete confirmation
+  confirmOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    zIndex: 100,
+  },
+  confirmCard: {
+    width: '100%',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  confirmTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 6,
+  },
+  confirmBody: {
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    lineHeight: 20,
+  },
+  confirmDivider: { height: StyleSheet.hairlineWidth },
+  confirmDeleteBtn: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  confirmDeleteText: { color: '#EF4444', fontSize: 16, fontWeight: '600' },
+  confirmCancelBtn: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  confirmCancelText: { fontSize: 16, fontWeight: '400' },
 });
