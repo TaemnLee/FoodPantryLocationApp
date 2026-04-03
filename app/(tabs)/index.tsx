@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Image, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const colorScheme = useColorScheme();
   const backgroundColor = useThemeColor({}, 'background');
   const textColor = useThemeColor({}, 'text');
   const mutedColor = useThemeColor({}, 'icon');
@@ -44,11 +45,13 @@ export default function HomeScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top', 'bottom']}>
       <View style={styles.container}>
         <View style={styles.main}>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>Licking County, OH</Text>
-          </View>
+          <Image
+            source={require('@/assets/images/fpn-logo.png')}
+            style={[styles.logo, colorScheme === 'dark' && { tintColor: '#FFFFFF' }]}
+            resizeMode="contain"
+          />
 
-          <Text style={[styles.title, { color: textColor }]}>Pantry{'\n'}Locator</Text>
+          <Text style={[styles.title, { color: textColor }]} numberOfLines={1} adjustsFontSizeToFit>Pantry Locator</Text>
 
           <Text style={[styles.subtitle, { color: mutedColor }]}>
             Find food pantries near you — hours, locations, and directions all in one place.
@@ -166,24 +169,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 20,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#2563EB',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  badgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+  logo: {
+    width: 200,
+    height: 130,
+    alignSelf: 'center',
   },
   title: {
     fontSize: 56,
     fontWeight: '800',
-    lineHeight: 60,
     letterSpacing: -1,
   },
   subtitle: {
