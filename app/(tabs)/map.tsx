@@ -251,19 +251,21 @@ export default function MapScreen() {
       distanceMiles(userCoords!.latitude, userCoords!.longitude, p.latitude, p.longitude);
     const byDist = (a: PantryLocation, b: PantryLocation) => dist(a) - dist(b);
 
-    const openNow = pantries.filter(isOpenNow).sort(byDist);
+    const activePantries = pantries.filter((p) => !p.temporary_closure);
+    const openNow = activePantries.filter(isOpenNow).sort(byDist);
     if (openNow.length) {
       const p = openNow[0];
       return { pantry: p, miles: dist(p), label: "Nearest open now" as const };
     }
 
-    const openToday = pantries.filter(opensLaterToday).sort(byDist);
+    const openToday = activePantries.filter(opensLaterToday).sort(byDist);
     if (openToday.length) {
       const p = openToday[0];
       return { pantry: p, miles: dist(p), label: "Nearest open today" as const };
     }
 
-    const closest = pantries.reduce((a, b) => (dist(a) < dist(b) ? a : b));
+    if (!activePantries.length) return null;
+    const closest = activePantries.reduce((a, b) => (dist(a) < dist(b) ? a : b));
     return { pantry: closest, miles: dist(closest), label: "Nearest pantry" as const };
   }, [userCoords, pantries]);
 
@@ -276,10 +278,11 @@ export default function MapScreen() {
 
 async function fetchPantries() {
   try {
-    const [{ data: locations, error: locError }, { data: hours, error: hoursError }] =
+    const [{ data: locations, error: locError }, { data: hours, error: hoursError }, { data: mains }] =
       await Promise.all([
         supabase.from("pantry_location").select("*"),
         supabase.from("pantry_op_hours").select("*"),
+        supabase.from("pantry_main").select("pantry_id, temporary_closure"),
       ]);
 
     if (locError) {
@@ -292,9 +295,13 @@ async function fetchPantries() {
     }
 
     const allHours = hours ?? [];
+    const closureMap = Object.fromEntries(
+      (mains ?? []).map((m) => [String(m.pantry_id), m.temporary_closure ?? false])
+    );
 
     const pantriesWithHours = (locations ?? []).map((p) => ({
       ...p,
+      temporary_closure: closureMap[String(p.pantry_id)] ?? false,
       pantry_op_hours: allHours.filter(
         (h) => String(h.pantry_id) === String(p.pantry_id)
       ),
@@ -330,6 +337,17 @@ useEffect(() => {
         event: "*",
         schema: "public",
         table: "pantry_op_hours",
+      },
+      () => {
+        fetchPantries();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pantry_main",
       },
       () => {
         fetchPantries();
@@ -397,12 +415,14 @@ useEffect(() => {
         showsMyLocationButton={!!userCoords}
         mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
         {visiblePantries.map((pantry) => {
+          const isTempClosed = pantry.temporary_closure === true;
           const { isOpen, closingTime, nextOpens } = getOpenStatus(pantry);
-          const statusText = isOpen
-            ? closingTime
-              ? `Open until ${closingTime}`
-              : "Open"
-            : nextOpens ?? "Closed";
+          const statusText = isTempClosed
+            ? "Temporarily Closed"
+            : isOpen
+              ? closingTime ? `Open until ${closingTime}` : "Open"
+              : nextOpens ?? "Closed";
+          const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
 
           return (
             <Marker
@@ -413,6 +433,7 @@ useEffect(() => {
               coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
               title={pantry.name}
               description={Platform.OS === "ios" ? `${pantry.street}, ${pantry.city}` : undefined}
+              pinColor={isTempClosed ? "#9CA3AF" : undefined}
               onPress={() => {
                 if (Platform.OS === "android") {
                   setMarkerModalPantry(pantry);
@@ -428,11 +449,7 @@ useEffect(() => {
                     <Text style={[styles.calloutAddress, { color: cardMuted }]} numberOfLines={1}>
                       {pantry.street}, {pantry.city}
                     </Text>
-                    <Text
-                      style={[
-                        styles.calloutStatus,
-                        { color: isOpen ? "#16a34a" : "#dc2626" },
-                      ]}>
+                    <Text style={[styles.calloutStatus, { color: statusColor }]}>
                       {statusText}
                     </Text>
                     <View style={styles.calloutDirectionsBtn}>
@@ -639,11 +656,12 @@ useEffect(() => {
       )}
 
       {!showSearchDropdown && displayPantry && (() => {
+        const isTempClosed = displayPantry.temporary_closure === true;
         const { isOpen, closingTime, nextOpens } = getOpenStatus(displayPantry);
-        const statusText = isOpen
-          ? closingTime ? `Open until ${closingTime}` : "Open"
-          : nextOpens ?? "Closed";
-        const statusColor = isOpen ? "#16a34a" : "#dc2626";
+        const statusText = isTempClosed
+          ? "Temporarily Closed"
+          : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+        const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
         return (
           <View style={[styles.bottomCard, { bottom: 8, backgroundColor: cardBg }]}>
             <View style={styles.cardBody}>
@@ -680,10 +698,12 @@ useEffect(() => {
             style={styles.markerModalOverlay}
             onPress={() => setMarkerModalPantry(null)}>
             {markerModalPantry && (() => {
+              const isTempClosed = markerModalPantry.temporary_closure === true;
               const { isOpen, closingTime, nextOpens } = getOpenStatus(markerModalPantry);
-              const statusText = isOpen
-                ? closingTime ? `Open until ${closingTime}` : "Open"
-                : nextOpens ?? "Closed";
+              const statusText = isTempClosed
+                ? "Temporarily Closed"
+                : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+              const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
               return (
                 <Pressable
                   style={[styles.markerModalCard, { backgroundColor: cardBg }]}
@@ -694,11 +714,7 @@ useEffect(() => {
                   <Text style={[styles.markerModalAddress, { color: cardMuted }]} numberOfLines={1}>
                     {markerModalPantry.street}, {markerModalPantry.city}
                   </Text>
-                  <Text
-                    style={[
-                      styles.markerModalStatus,
-                      { color: isOpen ? "#16a34a" : "#dc2626" },
-                    ]}>
+                  <Text style={[styles.markerModalStatus, { color: statusColor }]}>
                     {statusText}
                   </Text>
                   <Pressable

@@ -66,7 +66,7 @@ function pantryToForm(p: PantryLocation): PantryForm {
     state: p.state,
     zip: p.zip,
     service_type: p.service_type ?? '',
-    isClosed: false,
+    isClosed: p.temporary_closure ?? false,
     hours: (p.pantry_op_hours ?? []).map((h) => ({
       weekday: h.weekday,
       open_time: h.open_time,
@@ -108,7 +108,7 @@ export default function AdminScreen() {
       const [{ data: locations, error: locError }, { data: hours, error: hoursError }, { data: mains }] = await Promise.all([
         supabase.from('pantry_location').select('*'),
         supabase.from('pantry_op_hours').select('*'),
-        supabase.from('pantry_main').select('pantry_id, service_type'),
+        supabase.from('pantry_main').select('pantry_id, service_type, temporary_closure'),
       ]);
       if (locError) {
         console.error('Admin fetch error:', locError.message, locError.code);
@@ -118,10 +118,11 @@ export default function AdminScreen() {
       }
       if (hoursError) console.warn('Hours fetch error:', hoursError.message);
       const allHours = hours ?? [];
-      const serviceTypeMap = Object.fromEntries((mains ?? []).map((m) => [String(m.pantry_id), m.service_type ?? '']));
+      const mainMap = Object.fromEntries((mains ?? []).map((m) => [String(m.pantry_id), m]));
       const merged = (locations ?? []).map((p) => ({
         ...p,
-        service_type: serviceTypeMap[String(p.pantry_id)] ?? '',
+        service_type: mainMap[String(p.pantry_id)]?.service_type ?? '',
+        temporary_closure: mainMap[String(p.pantry_id)]?.temporary_closure ?? false,
         pantry_op_hours: allHours.filter((h) => String(h.pantry_id) === String(p.pantry_id)),
       }));
       setPantries(merged);
@@ -188,7 +189,7 @@ export default function AdminScreen() {
         if (!coords) { Alert.alert('Geocoding failed', 'Could not find coordinates for this address. Check the address and try again.'); return; }
         const pantry_id = ExpoCrypto.randomUUID();
         const { error: mainErr } = await supabase.from('pantry_main').insert({
-          pantry_id, name: form.name, service_type: form.service_type,
+          pantry_id, name: form.name, service_type: form.service_type, temporary_closure: form.isClosed,
         });
         if (mainErr) { Alert.alert('Error', mainErr.message); return; }
         const { error: insertErr } = await supabase.from('pantry_location').insert({
@@ -213,7 +214,7 @@ export default function AdminScreen() {
       } else {
         const id = editTarget!.pantry_id;
         await supabase.from('pantry_main').update({
-          name: form.name, service_type: form.service_type,
+          name: form.name, service_type: form.service_type, temporary_closure: form.isClosed,
         }).eq('pantry_id', id);
         const { error: updateErr } = await supabase.from('pantry_location').update({
           name: form.name, street: form.street, city: form.city,
@@ -228,7 +229,7 @@ export default function AdminScreen() {
         }
         setPantries((prev) => prev.map((p) =>
           p.pantry_id === id
-            ? { ...p, name: form.name, street: form.street, city: form.city, state: form.state, zip: form.zip, pantry_op_hours: form.hours.map((h) => ({ ...h, pantry_id: id, name: form.name })) }
+            ? { ...p, name: form.name, street: form.street, city: form.city, state: form.state, zip: form.zip, temporary_closure: form.isClosed, pantry_op_hours: form.hours.map((h) => ({ ...h, pantry_id: id, name: form.name })) }
             : p
         ));
       }
@@ -367,19 +368,29 @@ export default function AdminScreen() {
                       textColor={textColor} mutedColor={mutedColor} />
                   </View>
                   <View style={[styles.colDivider, { backgroundColor: borderColor }]} />
-                  <View style={{ flex: 1 }}>
-                    <FormField label="State" value={form.state}
+                  <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 10, gap: 4 }}>
+                    <Text style={[styles.timeInputLabel, { color: mutedColor }]}>State</Text>
+                    <TextInput
+                      style={[styles.fieldInput, { color: textColor }]}
+                      value={form.state}
                       onChangeText={(v) => setForm((f) => ({ ...f, state: v }))}
                       placeholder="OH"
-                      textColor={textColor} mutedColor={mutedColor} />
+                      placeholderTextColor={mutedColor}
+                      returnKeyType="next"
+                    />
                   </View>
                   <View style={[styles.colDivider, { backgroundColor: borderColor }]} />
-                  <View style={{ flex: 1 }}>
-                    <FormField label="ZIP" value={form.zip}
+                  <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 10, gap: 4 }}>
+                    <Text style={[styles.timeInputLabel, { color: mutedColor }]}>ZIP</Text>
+                    <TextInput
+                      style={[styles.fieldInput, { color: textColor }]}
+                      value={form.zip}
                       onChangeText={(v) => setForm((f) => ({ ...f, zip: v }))}
                       placeholder="43055"
-                      textColor={textColor} mutedColor={mutedColor}
-                      keyboardType="numeric" />
+                      placeholderTextColor={mutedColor}
+                      keyboardType="numeric"
+                      returnKeyType="next"
+                    />
                   </View>
                 </View>
               </View>
