@@ -282,9 +282,11 @@ export default function MapScreen() {
 
   const activeAnnouncements = useMemo(() => {
     const now = new Date();
-    return announcements.filter(
-      (a) => a.published && (!a.expires_at || new Date(a.expires_at) > now)
-    );
+    return announcements.filter((a) => {
+      const isLive = a.published || (a.scheduled_for && new Date(a.scheduled_for) <= now);
+      const notExpired = !a.expires_at || new Date(a.expires_at) > now;
+      return isLive && notExpired;
+    });
   }, [announcements]);
 
   const visibleBannerAnnouncements = useMemo(() => {

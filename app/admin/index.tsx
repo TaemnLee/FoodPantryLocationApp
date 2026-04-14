@@ -145,6 +145,8 @@ export default function AdminScreen() {
   const [showAnnDeleteConfirm, setShowAnnDeleteConfirm] = useState(false);
   const [showExpiresPicker, setShowExpiresPicker] = useState(false);
   const [expiresPickerMode, setExpiresPickerMode] = useState<'date' | 'time'>('date');
+  const [showSchedulePicker, setShowSchedulePicker] = useState(false);
+  const [schedulePickerMode, setSchedulePickerMode] = useState<'date' | 'time'>('date');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -321,14 +323,15 @@ export default function AdminScreen() {
 
   function openEditAnn(ann: Announcement) {
     setAnnEditTarget(ann);
+    const isScheduled = !!ann.scheduled_for && !ann.published;
     setAnnForm({
       title: ann.title,
       body: ann.body,
       category: ann.category,
       pantry_id: ann.pantry_id,
       expires_at: ann.expires_at ? new Date(ann.expires_at) : null,
-      status: ann.published ? 'publish_now' : 'draft',
-      schedule_at: null,
+      status: isScheduled ? 'schedule' : ann.published ? 'publish_now' : 'draft',
+      schedule_at: ann.scheduled_for ? new Date(ann.scheduled_for) : null,
     });
     setShowAnnForm(true);
   }
@@ -343,6 +346,9 @@ export default function AdminScreen() {
     if (!annForm.body.trim()) { Alert.alert('Missing field', 'Body is required.'); return; }
     setAnnSaving(true);
     try {
+      if (annForm.status === 'schedule' && !annForm.schedule_at) {
+        Alert.alert('Missing field', 'Please set a scheduled date & time.'); setAnnSaving(false); return;
+      }
       const payload = {
         title: annForm.title.trim(),
         body: annForm.body.trim(),
@@ -350,6 +356,9 @@ export default function AdminScreen() {
         pantry_id: annForm.pantry_id || null,
         expires_at: annForm.expires_at ? annForm.expires_at.toISOString() : null,
         published: annForm.status === 'publish_now',
+        scheduled_for: annForm.status === 'schedule' && annForm.schedule_at
+          ? annForm.schedule_at.toISOString()
+          : null,
       };
       if (isAddingAnn) {
         const { data, error } = await supabase
@@ -523,6 +532,9 @@ export default function AdminScreen() {
               renderItem={({ item }) => {
                 const catInfo = getCategoryInfo(item.category);
                 const isExpired = item.expires_at && new Date(item.expires_at) < new Date();
+                const isScheduled = !!item.scheduled_for && !item.published;
+                const isScheduledLive = isScheduled && new Date(item.scheduled_for!) <= new Date();
+                const isLive = item.published || isScheduledLive;
                 return (
                   <View style={styles.row}>
                     <View style={styles.rowInfo}>
@@ -532,7 +544,17 @@ export default function AdminScreen() {
                             {catInfo.label}
                           </Text>
                         </View>
-                        {!item.published && (
+                        {isLive && !isExpired && (
+                          <View style={[styles.annDraftBadge, { backgroundColor: '#F0FDF4' }]}>
+                            <Text style={[styles.annDraftBadgeText, { color: '#16a34a' }]}>Live</Text>
+                          </View>
+                        )}
+                        {isScheduled && !isScheduledLive && (
+                          <View style={[styles.annDraftBadge, { backgroundColor: '#EFF6FF' }]}>
+                            <Text style={[styles.annDraftBadgeText, { color: '#2563EB' }]}>Scheduled</Text>
+                          </View>
+                        )}
+                        {!isLive && !isScheduled && (
                           <View style={[styles.annDraftBadge, { backgroundColor: borderColor }]}>
                             <Text style={[styles.annDraftBadgeText, { color: mutedColor }]}>Draft</Text>
                           </View>
@@ -548,7 +570,9 @@ export default function AdminScreen() {
                       </Text>
                       <Text style={[styles.rowAddress, { color: mutedColor }]} numberOfLines={1}>
                         {getPantryName(item.pantry_id)}
-                        {item.expires_at ? ` · Expires ${formatDateTime(new Date(item.expires_at))}` : ''}
+                        {isScheduled
+                          ? ` · Publishes ${formatDateTime(new Date(item.scheduled_for!))}`
+                          : item.expires_at ? ` · Expires ${formatDateTime(new Date(item.expires_at))}` : ''}
                       </Text>
                     </View>
                     <Pressable
@@ -744,13 +768,25 @@ export default function AdminScreen() {
               <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
                 {([
                   { key: 'publish_now' as AnnStatus, title: 'Publish Now', sub: 'Immediately visible to all users', color: '#16a34a' },
+                  { key: 'schedule' as AnnStatus, title: 'Schedule', sub: 'Publish automatically at a set date & time', color: '#2563EB' },
                   { key: 'draft' as AnnStatus, title: 'Save as Draft', sub: 'Only visible to admins until published', color: '#F59E0B' },
                 ] as const).map((opt, i) => (
                   <View key={opt.key}>
                     {i > 0 && <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />}
                     <Pressable
                       style={styles.switchRow}
-                      onPress={() => setAnnForm((f) => ({ ...f, status: opt.key }))}>
+                      onPress={() => {
+                        setAnnForm((f) => ({ ...f, status: opt.key }));
+                        if (opt.key === 'schedule' && !annForm.schedule_at) {
+                          const tomorrow = new Date();
+                          tomorrow.setDate(tomorrow.getDate() + 1);
+                          tomorrow.setHours(9, 0, 0, 0);
+                          setAnnForm((f) => ({ ...f, status: 'schedule', schedule_at: tomorrow }));
+                          setSchedulePickerMode('date');
+                          setShowSchedulePicker(true);
+                        }
+                        if (opt.key !== 'schedule') setShowSchedulePicker(false);
+                      }}>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.switchLabel, { color: textColor }]}>{opt.title}</Text>
                         <Text style={[styles.switchSub, { color: mutedColor }]}>{opt.sub}</Text>
@@ -766,6 +802,65 @@ export default function AdminScreen() {
                     </Pressable>
                   </View>
                 ))}
+
+                {annForm.status === 'schedule' && (
+                  <>
+                    <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
+                    <View style={styles.switchRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.switchLabel, { color: textColor }]}>
+                          {annForm.schedule_at ? formatDateTime(annForm.schedule_at) : 'Not set'}
+                        </Text>
+                        <Text style={[styles.switchSub, { color: mutedColor }]}>
+                          Goes live at this date & time
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={({ pressed }) => [styles.pickerBtn, pressed && { opacity: 0.7 }]}
+                        onPress={() => {
+                          setSchedulePickerMode('date');
+                          setShowSchedulePicker(true);
+                        }}>
+                        <Text style={styles.pickerBtnText}>Change</Text>
+                      </Pressable>
+                    </View>
+                    {showSchedulePicker && (
+                      <View style={styles.datePickerContainer}>
+                        <DateTimePicker
+                          value={annForm.schedule_at ?? new Date()}
+                          mode={schedulePickerMode}
+                          display="spinner"
+                          minimumDate={new Date()}
+                          onChange={(_e, selectedDate) => {
+                            if (selectedDate) {
+                              setAnnForm((f) => ({ ...f, schedule_at: selectedDate }));
+                            }
+                          }}
+                        />
+                        <View style={styles.datePickerActions}>
+                          {schedulePickerMode === 'date' ? (
+                            <Pressable
+                              style={[styles.pickerBtn, { flex: 1 }]}
+                              onPress={() => setSchedulePickerMode('time')}>
+                              <Text style={styles.pickerBtnText}>Set Time →</Text>
+                            </Pressable>
+                          ) : (
+                            <Pressable
+                              style={[styles.pickerBtn, { flex: 1 }]}
+                              onPress={() => setSchedulePickerMode('date')}>
+                              <Text style={styles.pickerBtnText}>← Set Date</Text>
+                            </Pressable>
+                          )}
+                          <Pressable
+                            style={[styles.pickerBtn, { flex: 1, backgroundColor: '#2563EB' }]}
+                            onPress={() => setShowSchedulePicker(false)}>
+                            <Text style={[styles.pickerBtnText, { color: '#FFFFFF' }]}>Done</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
+                  </>
+                )}
               </View>
 
               {!isAddingAnn && (

@@ -34,5 +34,6 @@ export type Announcement = {
   pantry_id: string | null;
   created_at: string;
   expires_at: string | null;
+  scheduled_for: string | null;
   published: boolean;
 };
