@@ -22,3 +22,17 @@ export type PantryLocation = {
   temporary_closure?: boolean;
   pantry_op_hours?: PantryOpHours[];
 };
+
+export type AnnouncementCategory = 'urgent' | 'event' | 'hours_change' | 'general';
+
+/** Row from Supabase announcements table */
+export type Announcement = {
+  id: string;
+  title: string;
+  body: string;
+  category: AnnouncementCategory;
+  pantry_id: string | null;
+  created_at: string;
+  expires_at: string | null;
+  published: boolean;
+};

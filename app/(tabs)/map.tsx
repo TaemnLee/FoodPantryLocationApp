@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -15,10 +15,11 @@ import {
 } from "react-native";
 import MapView, { Callout, Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router";
 
 import { useThemeColor } from "@/hooks/use-theme-color";
 import { supabase } from "@/lib/supabase";
-import type { PantryLocation, PantryOpHours } from "@/types/pantry";
+import type { PantryLocation, PantryOpHours, Announcement } from "@/types/pantry";
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_ABBREV: Record<string, string> = {
@@ -190,6 +191,9 @@ export default function MapScreen() {
   const [filterMaxMiles, setFilterMaxMiles] = useState<number | null>(null);
   const [filterTime, setFilterTime] = useState<string | null>(null);
   const [expandedFilter, setExpandedFilter] = useState<"day" | "distance" | "time" | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [annDismissed, setAnnDismissed] = useState<Set<string>>(new Set());
+  const [annDetailModal, setAnnDetailModal] = useState<Announcement | null>(null);
   const cardBg = useThemeColor({}, "background");
   const cardText = useThemeColor({}, "text");
   const cardMuted = useThemeColor({}, "icon");
@@ -276,6 +280,59 @@ export default function MapScreen() {
       ? distanceMiles(userCoords.latitude, userCoords.longitude, displayPantry.latitude, displayPantry.longitude)
       : null;
 
+  const activeAnnouncements = useMemo(() => {
+    const now = new Date();
+    return announcements.filter(
+      (a) => a.published && (!a.expires_at || new Date(a.expires_at) > now)
+    );
+  }, [announcements]);
+
+  const visibleBannerAnnouncements = useMemo(() => {
+    return activeAnnouncements.filter((a) => !annDismissed.has(a.id));
+  }, [activeAnnouncements, annDismissed]);
+
+  function getAnnouncementsForPantry(pantryId: string): Announcement[] {
+    return activeAnnouncements.filter((a) => a.pantry_id === pantryId || a.pantry_id === null);
+  }
+
+  function hasActiveAnnouncement(pantryId: string): Announcement | undefined {
+    const priority: Announcement['category'][] = ['urgent', 'hours_change', 'event', 'general'];
+    for (const cat of priority) {
+      const found = activeAnnouncements.find(
+        (a) => (a.pantry_id === pantryId || a.pantry_id === null) && a.category === cat
+      );
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  function getAnnColor(category: string): string {
+    switch (category) {
+      case 'urgent': return '#EF4444';
+      case 'hours_change': return '#F59E0B';
+      case 'event': return '#8B5CF6';
+      default: return '#6B7280';
+    }
+  }
+
+  function getAnnPinColor(category: string): string {
+    switch (category) {
+      case 'urgent': return '#EF4444';
+      case 'hours_change': return '#F59E0B';
+      case 'event': return '#8B5CF6';
+      case 'general': return '#3B82F6';
+      default: return '#3B82F6';
+    }
+  }
+
+  async function fetchAnnouncements() {
+    const { data } = await supabase
+      .from("announcements")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setAnnouncements(data ?? []);
+  }
+
 async function fetchPantries() {
   try {
     const [{ data: locations, error: locError }, { data: hours, error: hoursError }, { data: mains }] =
@@ -315,7 +372,13 @@ async function fetchPantries() {
 
 useEffect(() => {
   fetchPantries();
+  fetchAnnouncements();
 }, []);
+
+useFocusEffect(useCallback(() => {
+  fetchPantries();
+  fetchAnnouncements();
+}, []));
 
 useEffect(() => {
   const channel = supabase
@@ -351,6 +414,17 @@ useEffect(() => {
       },
       () => {
         fetchPantries();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "announcements",
+      },
+      () => {
+        fetchAnnouncements();
       }
     )
     .subscribe();
@@ -416,13 +490,25 @@ useEffect(() => {
         mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
         {visiblePantries.map((pantry) => {
           const isTempClosed = pantry.temporary_closure === true;
+          const pantryAnn = hasActiveAnnouncement(pantry.pantry_id);
           const { isOpen, closingTime, nextOpens } = getOpenStatus(pantry);
           const statusText = isTempClosed
             ? "Temporarily Closed"
-            : isOpen
-              ? closingTime ? `Open until ${closingTime}` : "Open"
-              : nextOpens ?? "Closed";
-          const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
+            : pantryAnn
+              ? pantryAnn.title
+              : isOpen
+                ? closingTime ? `Open until ${closingTime}` : "Open"
+                : nextOpens ?? "Closed";
+          const statusColor = isTempClosed
+            ? "#F59E0B"
+            : pantryAnn
+              ? getAnnColor(pantryAnn.category)
+              : isOpen ? "#16a34a" : "#dc2626";
+          const pinColor = isTempClosed
+            ? "#9CA3AF"
+            : pantryAnn
+              ? getAnnPinColor(pantryAnn.category)
+              : undefined;
 
           return (
             <Marker
@@ -433,7 +519,7 @@ useEffect(() => {
               coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
               title={pantry.name}
               description={Platform.OS === "ios" ? `${pantry.street}, ${pantry.city}` : undefined}
-              pinColor={isTempClosed ? "#9CA3AF" : undefined}
+              pinColor={pinColor}
               onPress={() => {
                 if (Platform.OS === "android") {
                   setMarkerModalPantry(pantry);
@@ -452,6 +538,11 @@ useEffect(() => {
                     <Text style={[styles.calloutStatus, { color: statusColor }]}>
                       {statusText}
                     </Text>
+                    {pantryAnn && (
+                      <Text style={[styles.calloutAnnBody, { color: cardMuted }]} numberOfLines={2}>
+                        {pantryAnn.body}
+                      </Text>
+                    )}
                     <View style={styles.calloutDirectionsBtn}>
                       <Text style={styles.calloutDirectionsBtnText}>Directions</Text>
                     </View>
@@ -655,13 +746,106 @@ useEffect(() => {
         />
       )}
 
+      {!showSearchDropdown && visibleBannerAnnouncements.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={[styles.annBannerRow, { top: insets.top + 120 }]}
+          contentContainerStyle={styles.annBannerRowContent}>
+          {visibleBannerAnnouncements.map((ann) => {
+            const color = getAnnColor(ann.category);
+            const pantryName = ann.pantry_id
+              ? pantries.find((p) => p.pantry_id === ann.pantry_id)?.name ?? "Unknown"
+              : "All Pantries";
+            return (
+              <Pressable
+                key={ann.id}
+                style={[styles.annBanner, { backgroundColor: cardBg, borderLeftColor: color }]}
+                onPress={() => setAnnDetailModal(ann)}>
+                <View style={styles.annBannerContent}>
+                  <View style={styles.annBannerHeaderRow}>
+                    <View style={[styles.annBannerCatDot, { backgroundColor: color }]} />
+                    <Text style={[styles.annBannerPantryName, { color: cardMuted }]} numberOfLines={1}>
+                      {pantryName}
+                    </Text>
+                  </View>
+                  <Text style={[styles.annBannerTitle, { color: cardText }]} numberOfLines={1}>
+                    {ann.title}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.annBannerDismiss}
+                  hitSlop={8}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setAnnDismissed((prev) => new Set(prev).add(ann.id));
+                  }}>
+                  <Text style={[styles.annBannerDismissText, { color: cardMuted }]}>✕</Text>
+                </Pressable>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {/* Announcement Detail Modal */}
+      {annDetailModal && (
+        <Modal
+          visible={true}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAnnDetailModal(null)}>
+          <Pressable
+            style={styles.annDetailOverlay}
+            onPress={() => setAnnDetailModal(null)}>
+            <Pressable
+              style={[styles.annDetailCard, { backgroundColor: cardBg }]}
+              onPress={(e) => e.stopPropagation()}>
+              <View style={[styles.annDetailCatBadge, { backgroundColor: getAnnColor(annDetailModal.category) + '20' }]}>
+                <Text style={[styles.annDetailCatText, { color: getAnnColor(annDetailModal.category) }]}>
+                  {annDetailModal.category === 'hours_change' ? 'Hours Change'
+                    : annDetailModal.category.charAt(0).toUpperCase() + annDetailModal.category.slice(1)}
+                </Text>
+              </View>
+              <Text style={[styles.annDetailTitle, { color: cardText }]}>
+                {annDetailModal.title}
+              </Text>
+              <Text style={[styles.annDetailPantry, { color: cardMuted }]}>
+                {annDetailModal.pantry_id
+                  ? pantries.find((p) => p.pantry_id === annDetailModal.pantry_id)?.name ?? "Unknown Pantry"
+                  : "All Pantries"}
+              </Text>
+              <View style={[styles.annDetailDivider, { backgroundColor: cardMuted + '30' }]} />
+              <Text style={[styles.annDetailBody, { color: cardText }]}>
+                {annDetailModal.body}
+              </Text>
+              {annDetailModal.expires_at && (
+                <Text style={[styles.annDetailExpires, { color: cardMuted }]}>
+                  Expires: {new Date(annDetailModal.expires_at).toLocaleString()}
+                </Text>
+              )}
+              <Pressable
+                style={styles.annDetailCloseBtn}
+                onPress={() => setAnnDetailModal(null)}>
+                <Text style={styles.annDetailCloseBtnText}>Close</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
       {!showSearchDropdown && displayPantry && (() => {
         const isTempClosed = displayPantry.temporary_closure === true;
+        const displayAnn = hasActiveAnnouncement(displayPantry.pantry_id);
         const { isOpen, closingTime, nextOpens } = getOpenStatus(displayPantry);
         const statusText = isTempClosed
           ? "Temporarily Closed"
-          : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
-        const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
+          : displayAnn
+            ? displayAnn.title
+            : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+        const statusColor = isTempClosed ? "#F59E0B"
+          : displayAnn ? getAnnColor(displayAnn.category)
+          : isOpen ? "#16a34a" : "#dc2626";
         return (
           <View style={[styles.bottomCard, { bottom: 8, backgroundColor: cardBg }]}>
             <View style={styles.cardBody}>
@@ -699,11 +883,16 @@ useEffect(() => {
             onPress={() => setMarkerModalPantry(null)}>
             {markerModalPantry && (() => {
               const isTempClosed = markerModalPantry.temporary_closure === true;
+              const modalAnn = hasActiveAnnouncement(markerModalPantry.pantry_id);
               const { isOpen, closingTime, nextOpens } = getOpenStatus(markerModalPantry);
               const statusText = isTempClosed
                 ? "Temporarily Closed"
-                : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
-              const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
+                : modalAnn
+                  ? modalAnn.title
+                  : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+              const statusColor = isTempClosed ? "#F59E0B"
+                : modalAnn ? getAnnColor(modalAnn.category)
+                : isOpen ? "#16a34a" : "#dc2626";
               return (
                 <Pressable
                   style={[styles.markerModalCard, { backgroundColor: cardBg }]}
@@ -717,6 +906,11 @@ useEffect(() => {
                   <Text style={[styles.markerModalStatus, { color: statusColor }]}>
                     {statusText}
                   </Text>
+                  {modalAnn && (
+                    <Text style={[styles.markerModalAnnBody, { color: cardMuted }]} numberOfLines={3}>
+                      {modalAnn.body}
+                    </Text>
+                  )}
                   <Pressable
                     style={styles.markerModalDirectionsBtn}
                     onPress={() => {
@@ -1022,6 +1216,141 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: "transparent",
+  },
+  calloutAnnBody: {
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  markerModalAnnBody: {
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  annBannerRow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    zIndex: 9,
+    maxHeight: 80,
+  },
+  annBannerRowContent: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  annBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minWidth: 220,
+    maxWidth: 300,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  annBannerContent: {
+    flex: 1,
+    gap: 3,
+  },
+  annBannerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  annBannerCatDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  annBannerPantryName: {
+    fontSize: 11,
+    fontWeight: "600",
+    flex: 1,
+  },
+  annBannerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  annBannerDismiss: {
+    padding: 6,
+    marginLeft: 8,
+  },
+  annBannerDismissText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  annDetailOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  annDetailCard: {
+    width: "100%",
+    maxWidth: 340,
+    borderRadius: 16,
+    padding: 24,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  annDetailCatBadge: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: "flex-start",
+    marginBottom: 12,
+  },
+  annDetailCatText: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  annDetailTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  annDetailPantry: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  annDetailDivider: {
+    height: 1,
+    marginVertical: 16,
+  },
+  annDetailBody: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  annDetailExpires: {
+    fontSize: 13,
+    marginTop: 12,
+    fontStyle: "italic",
+  },
+  annDetailCloseBtn: {
+    marginTop: 20,
+    backgroundColor: "#2563EB",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  annDetailCloseBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
   },
   bottomCard: {
     position: "absolute",

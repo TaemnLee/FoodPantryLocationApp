@@ -7,9 +7,10 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ExpoCrypto from 'expo-crypto';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/lib/supabase';
-import type { PantryLocation } from '@/types/pantry';
+import type { PantryLocation, Announcement, AnnouncementCategory } from '@/types/pantry';
 
 async function geocodeAddress(street: string, city: string, state: string, zip: string): Promise<{ lat: number; lng: number } | null> {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -58,6 +59,41 @@ const EMPTY_FORM: PantryForm = {
   service_type: '', isClosed: false, hours: [],
 };
 
+const ANNOUNCEMENT_CATEGORIES: { value: AnnouncementCategory; label: string; color: string }[] = [
+  { value: 'urgent', label: 'Urgent', color: '#EF4444' },
+  { value: 'hours_change', label: 'Hours Change', color: '#F59E0B' },
+  { value: 'event', label: 'Event', color: '#8B5CF6' },
+  { value: 'general', label: 'General', color: '#6B7280' },
+];
+
+type AnnStatus = 'publish_now' | 'draft' | 'schedule';
+
+type AnnouncementForm = {
+  title: string;
+  body: string;
+  category: AnnouncementCategory;
+  pantry_id: string | null;
+  expires_at: Date | null;
+  status: AnnStatus;
+  schedule_at: Date | null;
+};
+
+const EMPTY_ANN_FORM: AnnouncementForm = {
+  title: '', body: '', category: 'general', pantry_id: null,
+  expires_at: null, status: 'publish_now', schedule_at: null,
+};
+
+function formatDateTime(d: Date): string {
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
+  const year = d.getFullYear();
+  const hours = d.getHours();
+  const mins = d.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const h12 = hours % 12 || 12;
+  return `${month}/${day}/${year} ${h12}:${mins} ${ampm}`;
+}
+
 function pantryToForm(p: PantryLocation): PantryForm {
   return {
     name: p.name,
@@ -87,6 +123,8 @@ export default function AdminScreen() {
   const inputBg = useThemeColor({ light: '#FFFFFF', dark: '#111827' }, 'background');
   const separatorColor = useThemeColor({ light: '#F3F4F6', dark: '#1F2937' }, 'background');
 
+  const [activeTab, setActiveTab] = useState<'pantries' | 'announcements'>('pantries');
+
   const [pantries, setPantries] = useState<PantryLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,6 +134,17 @@ export default function AdminScreen() {
   const [newHour, setNewHour] = useState<FormHour>({ weekday: 'monday', open_time: '09:00', close_time: '17:00' });
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [annLoading, setAnnLoading] = useState(true);
+  const [annSearchQuery, setAnnSearchQuery] = useState('');
+  const [showAnnForm, setShowAnnForm] = useState(false);
+  const [annEditTarget, setAnnEditTarget] = useState<Announcement | null>(null);
+  const [annForm, setAnnForm] = useState<AnnouncementForm>(EMPTY_ANN_FORM);
+  const [annSaving, setAnnSaving] = useState(false);
+  const [showAnnDeleteConfirm, setShowAnnDeleteConfirm] = useState(false);
+  const [showExpiresPicker, setShowExpiresPicker] = useState(false);
+  const [expiresPickerMode, setExpiresPickerMode] = useState<'date' | 'time'>('date');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -129,6 +178,28 @@ export default function AdminScreen() {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from('announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('Announcements fetch error:', error.message);
+      }
+      setAnnouncements(data ?? []);
+      setAnnLoading(false);
+    })();
+  }, []);
+
+  const filteredAnnouncements = useMemo(() => {
+    const q = annSearchQuery.trim().toLowerCase();
+    if (!q) return announcements;
+    return announcements.filter((a) =>
+      [a.title, a.body, a.category].join(' ').toLowerCase().includes(q)
+    );
+  }, [announcements, annSearchQuery]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -240,6 +311,92 @@ export default function AdminScreen() {
   }
 
   const isAdding = editTarget === null;
+  const isAddingAnn = annEditTarget === null;
+
+  function openAddAnn() {
+    setAnnEditTarget(null);
+    setAnnForm(EMPTY_ANN_FORM);
+    setShowAnnForm(true);
+  }
+
+  function openEditAnn(ann: Announcement) {
+    setAnnEditTarget(ann);
+    setAnnForm({
+      title: ann.title,
+      body: ann.body,
+      category: ann.category,
+      pantry_id: ann.pantry_id,
+      expires_at: ann.expires_at ? new Date(ann.expires_at) : null,
+      status: ann.published ? 'publish_now' : 'draft',
+      schedule_at: null,
+    });
+    setShowAnnForm(true);
+  }
+
+  function closeAnnForm() {
+    setShowAnnForm(false);
+    setAnnEditTarget(null);
+  }
+
+  async function handleAnnSave() {
+    if (!annForm.title.trim()) { Alert.alert('Missing field', 'Title is required.'); return; }
+    if (!annForm.body.trim()) { Alert.alert('Missing field', 'Body is required.'); return; }
+    setAnnSaving(true);
+    try {
+      const payload = {
+        title: annForm.title.trim(),
+        body: annForm.body.trim(),
+        category: annForm.category,
+        pantry_id: annForm.pantry_id || null,
+        expires_at: annForm.expires_at ? annForm.expires_at.toISOString() : null,
+        published: annForm.status === 'publish_now',
+      };
+      if (isAddingAnn) {
+        const { data, error } = await supabase
+          .from('announcements')
+          .insert({ id: ExpoCrypto.randomUUID(), ...payload })
+          .select()
+          .single();
+        if (error) { Alert.alert('Error', error.message); return; }
+        setAnnouncements((prev) => [data, ...prev]);
+      } else {
+        const { data, error } = await supabase
+          .from('announcements')
+          .update(payload)
+          .eq('id', annEditTarget!.id)
+          .select()
+          .single();
+        if (error) { Alert.alert('Error', error.message); return; }
+        setAnnouncements((prev) => prev.map((a) => a.id === data.id ? data : a));
+      }
+      closeAnnForm();
+    } finally {
+      setAnnSaving(false);
+    }
+  }
+
+  async function handleAnnDelete() {
+    if (!annEditTarget) return;
+    setAnnSaving(true);
+    try {
+      const { error } = await supabase.from('announcements').delete().eq('id', annEditTarget.id);
+      if (error) { Alert.alert('Error', error.message); return; }
+      setAnnouncements((prev) => prev.filter((a) => a.id !== annEditTarget.id));
+      setShowAnnDeleteConfirm(false);
+      closeAnnForm();
+    } finally {
+      setAnnSaving(false);
+    }
+  }
+
+  function getPantryName(pantryId: string | null): string {
+    if (!pantryId) return 'All Pantries';
+    return pantries.find((p) => p.pantry_id === pantryId)?.name ?? 'Unknown';
+  }
+
+  function getCategoryInfo(cat: AnnouncementCategory) {
+    return ANNOUNCEMENT_CATEGORIES.find((c) => c.value === cat) ?? ANNOUNCEMENT_CATEGORIES[3];
+  }
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]} edges={['top']}>
@@ -257,61 +414,397 @@ export default function AdminScreen() {
         </Pressable>
       </View>
 
-      {/* Search + Add */}
-      <View style={[styles.toolbar, { borderBottomColor: borderColor }]}>
-        <TextInput
-          style={[styles.searchInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
-          placeholder="Search pantries…"
-          placeholderTextColor={mutedColor}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          returnKeyType="search"
-        />
+      {/* Tab Switcher */}
+      <View style={[styles.tabBar, { borderBottomColor: borderColor }]}>
         <Pressable
-          style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
-          onPress={openAdd}>
-          <Text style={styles.addBtnText}>+ Add</Text>
+          style={[styles.tab, activeTab === 'pantries' && styles.tabActive]}
+          onPress={() => setActiveTab('pantries')}>
+          <Text style={[styles.tabText, { color: mutedColor }, activeTab === 'pantries' && styles.tabTextActive]}>
+            Pantries
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tab, activeTab === 'announcements' && styles.tabActive]}
+          onPress={() => setActiveTab('announcements')}>
+          <Text style={[styles.tabText, { color: mutedColor }, activeTab === 'announcements' && styles.tabTextActive]}>
+            Announcements
+          </Text>
         </Pressable>
       </View>
 
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" />
-        </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={(p) => p.pantry_id}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
-          ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: separatorColor }]} />}
-          renderItem={({ item }) => (
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={[styles.rowName, { color: textColor }]} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text style={[styles.rowAddress, { color: mutedColor }]} numberOfLines={1}>
-                  {item.street}, {item.city}
-                </Text>
-                <View style={styles.rowHoursRow}>
-                  <Text style={[styles.rowHoursCount, { color: mutedColor }]}>
-                    {item.pantry_op_hours?.length
-                      ? `${item.pantry_op_hours.length} hour slot${item.pantry_op_hours.length !== 1 ? 's' : ''}`
-                      : 'No hours set'}
-                  </Text>
-                </View>
-              </View>
-              <Pressable
-                style={({ pressed }) => [styles.editBtn, { borderColor }, pressed && { opacity: 0.7 }]}
-                onPress={() => openEdit(item)}>
-                <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
-              </Pressable>
+      {activeTab === 'pantries' ? (
+        <>
+          {/* Search + Add */}
+          <View style={[styles.toolbar, { borderBottomColor: borderColor }]}>
+            <TextInput
+              style={[styles.searchInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
+              placeholder="Search pantries…"
+              placeholderTextColor={mutedColor}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+            />
+            <Pressable
+              style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
+              onPress={openAdd}>
+              <Text style={styles.addBtnText}>+ Add</Text>
+            </Pressable>
+          </View>
+
+          {loading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" />
             </View>
+          ) : (
+            <FlatList
+              data={filtered}
+              keyExtractor={(p) => p.pantry_id}
+              contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
+              ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: separatorColor }]} />}
+              renderItem={({ item }) => (
+                <View style={styles.row}>
+                  <View style={styles.rowInfo}>
+                    <Text style={[styles.rowName, { color: textColor }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.rowAddress, { color: mutedColor }]} numberOfLines={1}>
+                      {item.street}, {item.city}
+                    </Text>
+                    <View style={styles.rowHoursRow}>
+                      <Text style={[styles.rowHoursCount, { color: mutedColor }]}>
+                        {item.pantry_op_hours?.length
+                          ? `${item.pantry_op_hours.length} hour slot${item.pantry_op_hours.length !== 1 ? 's' : ''}`
+                          : 'No hours set'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    style={({ pressed }) => [styles.editBtn, { borderColor }, pressed && { opacity: 0.7 }]}
+                    onPress={() => openEdit(item)}>
+                    <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
+                  </Pressable>
+                </View>
+              )}
+            />
           )}
-        />
+        </>
+      ) : (
+        <>
+          {/* Announcements Search + Add */}
+          <View style={[styles.toolbar, { borderBottomColor: borderColor }]}>
+            <TextInput
+              style={[styles.searchInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
+              placeholder="Search announcements…"
+              placeholderTextColor={mutedColor}
+              value={annSearchQuery}
+              onChangeText={setAnnSearchQuery}
+              returnKeyType="search"
+            />
+            <Pressable
+              style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
+              onPress={openAddAnn}>
+              <Text style={styles.addBtnText}>+ Add</Text>
+            </Pressable>
+          </View>
+
+          {annLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" />
+            </View>
+          ) : (
+            <FlatList
+              data={filteredAnnouncements}
+              keyExtractor={(a) => a.id}
+              contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
+              ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: separatorColor }]} />}
+              ListEmptyComponent={
+                <Text style={[styles.emptyText, { color: mutedColor }]}>No announcements yet</Text>
+              }
+              renderItem={({ item }) => {
+                const catInfo = getCategoryInfo(item.category);
+                const isExpired = item.expires_at && new Date(item.expires_at) < new Date();
+                return (
+                  <View style={styles.row}>
+                    <View style={styles.rowInfo}>
+                      <View style={styles.annRowHeader}>
+                        <View style={[styles.annCategoryBadge, { backgroundColor: catInfo.color + '20' }]}>
+                          <Text style={[styles.annCategoryBadgeText, { color: catInfo.color }]}>
+                            {catInfo.label}
+                          </Text>
+                        </View>
+                        {!item.published && (
+                          <View style={[styles.annDraftBadge, { backgroundColor: borderColor }]}>
+                            <Text style={[styles.annDraftBadgeText, { color: mutedColor }]}>Draft</Text>
+                          </View>
+                        )}
+                        {isExpired && (
+                          <View style={[styles.annDraftBadge, { backgroundColor: '#FEF2F2' }]}>
+                            <Text style={[styles.annDraftBadgeText, { color: '#EF4444' }]}>Expired</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.rowName, { color: textColor }]} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                      <Text style={[styles.rowAddress, { color: mutedColor }]} numberOfLines={1}>
+                        {getPantryName(item.pantry_id)}
+                        {item.expires_at ? ` · Expires ${formatDateTime(new Date(item.expires_at))}` : ''}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={({ pressed }) => [styles.editBtn, { borderColor }, pressed && { opacity: 0.7 }]}
+                      onPress={() => openEditAnn(item)}>
+                      <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
+                    </Pressable>
+                  </View>
+                );
+              }}
+            />
+          )}
+        </>
       )}
 
-      {/* Edit / Add Modal */}
+      {/* Announcement Edit / Add Modal */}
+      <Modal
+        visible={showAnnForm}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeAnnForm}>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]} edges={['top']}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+
+            <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
+              <Pressable onPress={closeAnnForm}>
+                <Text style={[styles.modalCancel, { color: mutedColor }]}>Cancel</Text>
+              </Pressable>
+              <Text style={[styles.modalTitle, { color: textColor }]}>
+                {isAddingAnn ? 'New Announcement' : 'Edit Announcement'}
+              </Text>
+              <Pressable onPress={handleAnnSave} disabled={annSaving}>
+                <Text style={[styles.modalSave, annSaving && { opacity: 0.4 }]}>
+                  {annSaving ? 'Saving…' : 'Save'}
+                </Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={[styles.formContent, { paddingBottom: insets.bottom + 32 }]}
+              keyboardShouldPersistTaps="handled">
+
+              <Text style={[styles.sectionLabel, { color: mutedColor }]}>CONTENT</Text>
+              <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+                <FormField label="Title" value={annForm.title}
+                  onChangeText={(v) => setAnnForm((f) => ({ ...f, title: v }))}
+                  placeholder="Short headline"
+                  textColor={textColor} mutedColor={mutedColor} />
+                <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
+                <View style={styles.fieldRow}>
+                  <Text style={[styles.fieldLabel, { color: mutedColor }]}>Body</Text>
+                  <TextInput
+                    style={[styles.fieldInput, { color: textColor, minHeight: 60 }]}
+                    value={annForm.body}
+                    onChangeText={(v) => setAnnForm((f) => ({ ...f, body: v }))}
+                    placeholder="Full message…"
+                    placeholderTextColor={mutedColor}
+                    multiline
+                  />
+                </View>
+              </View>
+
+              <Text style={[styles.sectionLabel, { color: mutedColor }]}>CATEGORY</Text>
+              <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.annCategoryRow}>
+                  {ANNOUNCEMENT_CATEGORIES.map((cat) => {
+                    const isActive = annForm.category === cat.value;
+                    return (
+                      <Pressable
+                        key={cat.value}
+                        style={[
+                          styles.annCatChip,
+                          { borderColor: cat.color + '40' },
+                          isActive && { backgroundColor: cat.color, borderColor: cat.color },
+                        ]}
+                        onPress={() => setAnnForm((f) => ({ ...f, category: cat.value }))}>
+                        <Text style={[
+                          styles.annCatChipText,
+                          { color: cat.color },
+                          isActive && { color: '#FFFFFF' },
+                        ]}>
+                          {cat.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              <Text style={[styles.sectionLabel, { color: mutedColor }]}>PANTRY (OPTIONAL)</Text>
+              <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+                <Pressable
+                  style={styles.fieldRow}
+                  onPress={() => {
+                    const options = [
+                      { text: 'All Pantries (App-Wide)', onPress: () => setAnnForm((f) => ({ ...f, pantry_id: null })) },
+                      ...pantries.map((p) => ({
+                        text: p.name,
+                        onPress: () => setAnnForm((f) => ({ ...f, pantry_id: p.pantry_id })),
+                      })),
+                    ];
+                    Alert.alert('Select Pantry', 'Choose which pantry this announcement is for', [
+                      ...options,
+                      { text: 'Cancel', style: 'cancel' },
+                    ]);
+                  }}>
+                  <Text style={[styles.fieldLabel, { color: mutedColor }]}>Pantry</Text>
+                  <Text style={[styles.fieldInput, { color: textColor }]}>
+                    {getPantryName(annForm.pantry_id)}
+                  </Text>
+                </Pressable>
+              </View>
+
+              <Text style={[styles.sectionLabel, { color: mutedColor }]}>EXPIRATION</Text>
+              <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.switchLabel, { color: textColor }]}>
+                      {annForm.expires_at ? formatDateTime(annForm.expires_at) : 'No expiration'}
+                    </Text>
+                    <Text style={[styles.switchSub, { color: mutedColor }]}>
+                      {annForm.expires_at ? 'Auto-hides after this date & time' : 'Stays until manually removed'}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Pressable
+                      style={({ pressed }) => [styles.pickerBtn, pressed && { opacity: 0.7 }]}
+                      onPress={() => {
+                        if (!annForm.expires_at) {
+                          const tomorrow = new Date();
+                          tomorrow.setDate(tomorrow.getDate() + 1);
+                          tomorrow.setHours(17, 0, 0, 0);
+                          setAnnForm((f) => ({ ...f, expires_at: tomorrow }));
+                        }
+                        setExpiresPickerMode('date');
+                        setShowExpiresPicker(true);
+                      }}>
+                      <Text style={styles.pickerBtnText}>
+                        {annForm.expires_at ? 'Change' : 'Set'}
+                      </Text>
+                    </Pressable>
+                    {annForm.expires_at && (
+                      <Pressable
+                        style={({ pressed }) => [styles.pickerClearBtn, pressed && { opacity: 0.7 }]}
+                        onPress={() => setAnnForm((f) => ({ ...f, expires_at: null }))}>
+                        <Text style={styles.pickerClearBtnText}>Clear</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+                {showExpiresPicker && (
+                  <View style={styles.datePickerContainer}>
+                    <DateTimePicker
+                      value={annForm.expires_at ?? new Date()}
+                      mode={expiresPickerMode}
+                      display="spinner"
+                      minimumDate={new Date()}
+                      onChange={(_e, selectedDate) => {
+                        if (selectedDate) {
+                          setAnnForm((f) => ({ ...f, expires_at: selectedDate }));
+                        }
+                      }}
+                    />
+                    <View style={styles.datePickerActions}>
+                      {expiresPickerMode === 'date' ? (
+                        <Pressable
+                          style={[styles.pickerBtn, { flex: 1 }]}
+                          onPress={() => setExpiresPickerMode('time')}>
+                          <Text style={styles.pickerBtnText}>Set Time →</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          style={[styles.pickerBtn, { flex: 1 }]}
+                          onPress={() => setExpiresPickerMode('date')}>
+                          <Text style={styles.pickerBtnText}>← Set Date</Text>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        style={[styles.pickerBtn, { flex: 1, backgroundColor: '#2563EB' }]}
+                        onPress={() => setShowExpiresPicker(false)}>
+                        <Text style={[styles.pickerBtnText, { color: '#FFFFFF' }]}>Done</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              <Text style={[styles.sectionLabel, { color: mutedColor }]}>VISIBILITY</Text>
+              <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+                {([
+                  { key: 'publish_now' as AnnStatus, title: 'Publish Now', sub: 'Immediately visible to all users', color: '#16a34a' },
+                  { key: 'draft' as AnnStatus, title: 'Save as Draft', sub: 'Only visible to admins until published', color: '#F59E0B' },
+                ] as const).map((opt, i) => (
+                  <View key={opt.key}>
+                    {i > 0 && <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />}
+                    <Pressable
+                      style={styles.switchRow}
+                      onPress={() => setAnnForm((f) => ({ ...f, status: opt.key }))}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.switchLabel, { color: textColor }]}>{opt.title}</Text>
+                        <Text style={[styles.switchSub, { color: mutedColor }]}>{opt.sub}</Text>
+                      </View>
+                      <View style={[
+                        styles.radioOuter,
+                        { borderColor: annForm.status === opt.key ? opt.color : borderColor },
+                      ]}>
+                        {annForm.status === opt.key && (
+                          <View style={[styles.radioInner, { backgroundColor: opt.color }]} />
+                        )}
+                      </View>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+
+              {!isAddingAnn && (
+                <Pressable
+                  style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.8 }]}
+                  onPress={() => setShowAnnDeleteConfirm(true)}>
+                  <Text style={styles.deleteBtnText}>Delete Announcement</Text>
+                </Pressable>
+              )}
+            </ScrollView>
+          </KeyboardAvoidingView>
+
+          {showAnnDeleteConfirm && (
+            <Pressable style={styles.confirmOverlay} onPress={() => setShowAnnDeleteConfirm(false)}>
+              <Pressable style={[styles.confirmCard, { backgroundColor: bg, borderColor }]} onPress={() => {}}>
+                <Text style={[styles.confirmTitle, { color: textColor }]}>Delete Announcement?</Text>
+                <Text style={[styles.confirmBody, { color: mutedColor }]}>
+                  "{annEditTarget?.title}" will be permanently removed.
+                </Text>
+                <View style={[styles.confirmDivider, { backgroundColor: borderColor }]} />
+                <Pressable
+                  style={({ pressed }) => [styles.confirmDeleteBtn, pressed && { opacity: 0.8 }]}
+                  onPress={handleAnnDelete}
+                  disabled={annSaving}>
+                  <Text style={styles.confirmDeleteText}>{annSaving ? 'Deleting…' : 'Delete'}</Text>
+                </Pressable>
+                <View style={[styles.confirmDivider, { backgroundColor: borderColor }]} />
+                <Pressable
+                  style={({ pressed }) => [styles.confirmCancelBtn, pressed && { opacity: 0.7 }]}
+                  onPress={() => setShowAnnDeleteConfirm(false)}>
+                  <Text style={[styles.confirmCancelText, { color: textColor }]}>Cancel</Text>
+                </Pressable>
+              </Pressable>
+            </Pressable>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Pantry Edit / Add Modal */}
       <Modal
         visible={showForm}
         animationType="slide"
@@ -560,6 +1053,82 @@ function FormField({
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // Tabs
+  tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: '#2563EB',
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  tabTextActive: {
+    color: '#2563EB',
+  },
+
+  // Announcement list items
+  emptyText: { padding: 32, fontSize: 15, textAlign: 'center' },
+  annRowHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  annCategoryBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  annCategoryBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
+  annDraftBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  annDraftBadgeText: { fontSize: 11, fontWeight: '600' },
+
+  // Announcement form
+  annCategoryRow: { gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
+  annCatChip: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1.5,
+  },
+  annCatChipText: { fontSize: 13, fontWeight: '700' },
+
+  // Date picker
+  pickerBtn: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  pickerBtnText: { color: '#2563EB', fontSize: 13, fontWeight: '700' },
+  pickerClearBtn: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  pickerClearBtnText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
+  datePickerContainer: { paddingHorizontal: 16, paddingBottom: 12 },
+  datePickerActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+
+  // Radio buttons
+  radioOuter: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
 
   // Header
   header: {
