@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Image, useColorScheme } from 'react-native';
+import { Animated, StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Image, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -18,9 +18,24 @@ export default function HomeScreen() {
   const borderColor = useThemeColor({ light: '#E5E7EB', dark: '#374151' }, 'background');
 
   const [pantryCount, setPantryCount] = useState<number | null>(null);
-  const [showSignIn, setShowSignIn] = useState(false);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const sheetAnim = useRef(new Animated.Value(0)).current;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  function openSignIn() {
+    setSheetVisible(true);
+    sheetAnim.setValue(0);
+    Animated.spring(sheetAnim, { toValue: 1, useNativeDriver: true, bounciness: 4 }).start();
+  }
+
+  function closeSignIn() {
+    Animated.timing(sheetAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => {
+      setSheetVisible(false);
+      setEmail('');
+      setPassword('');
+    });
+  }
 
   useFocusEffect(useCallback(() => {
     supabase
@@ -35,14 +50,12 @@ export default function HomeScreen() {
       Alert.alert('Sign In Failed', error.message);
       return;
     }
-    setShowSignIn(false);
-    setEmail('');
-    setPassword('');
+    closeSignIn();
     router.push('/admin');
   }
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top']}>
       <View style={styles.container}>
         <View style={styles.main}>
           <Image
@@ -95,7 +108,7 @@ export default function HomeScreen() {
           if (session) {
             router.push('/admin');
           } else {
-            setShowSignIn(true);
+            openSignIn();
           }
         }}>
           <Text style={[styles.adminLinkText, { color: mutedColor }]}>Admin</Text>
@@ -103,54 +116,60 @@ export default function HomeScreen() {
       </View>
 
       <Modal
-        visible={showSignIn}
+        visible={sheetVisible}
         transparent
-        animationType="fade"
-        onRequestClose={() => setShowSignIn(false)}>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowSignIn(false)} />
-          <View style={[styles.signInCard, { backgroundColor }]}>
-            <Text style={[styles.signInTitle, { color: textColor }]}>Admin Sign In</Text>
-            <Text style={[styles.signInSubtitle, { color: mutedColor }]}>
-              For authorized personnel only
-            </Text>
+        animationType="none"
+        onRequestClose={closeSignIn}>
+        <Animated.View style={[styles.modalOverlay, { opacity: sheetAnim }]} pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeSignIn} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            pointerEvents="box-none">
+            <Animated.View
+              style={[
+                styles.signInCard,
+                { backgroundColor, transform: [{ translateY: sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] }) }] },
+              ]}>
+              <Text style={[styles.signInTitle, { color: textColor }]}>Admin Sign In</Text>
+              <Text style={[styles.signInSubtitle, { color: mutedColor }]}>
+                For authorized personnel only
+              </Text>
 
-            <View style={styles.signInFields}>
-              <TextInput
-                style={[styles.signInInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
-                placeholder="Email"
-                placeholderTextColor={mutedColor}
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                returnKeyType="next"
-              />
-              <TextInput
-                style={[styles.signInInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
-                placeholder="Password"
-                placeholderTextColor={mutedColor}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                returnKeyType="done"
-                onSubmitEditing={handleSignIn}
-              />
-            </View>
+              <View style={styles.signInFields}>
+                <TextInput
+                  style={[styles.signInInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
+                  placeholder="Email"
+                  placeholderTextColor={mutedColor}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  returnKeyType="next"
+                />
+                <TextInput
+                  style={[styles.signInInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
+                  placeholder="Password"
+                  placeholderTextColor={mutedColor}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  returnKeyType="done"
+                  onSubmitEditing={handleSignIn}
+                />
+              </View>
 
-            <Pressable
-              style={({ pressed }) => [styles.signInBtn, pressed && styles.signInBtnPressed]}
-              onPress={handleSignIn}>
-              <Text style={styles.signInBtnText}>Sign In</Text>
-            </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.signInBtn, pressed && styles.signInBtnPressed]}
+                onPress={handleSignIn}>
+                <Text style={styles.signInBtnText}>Sign In</Text>
+              </Pressable>
 
-            <Pressable style={styles.cancelBtn} onPress={() => setShowSignIn(false)}>
-              <Text style={[styles.cancelBtnText, { color: mutedColor }]}>Cancel</Text>
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
+              <Pressable style={styles.cancelBtn} onPress={closeSignIn}>
+                <Text style={[styles.cancelBtnText, { color: mutedColor }]}>Cancel</Text>
+              </Pressable>
+            </Animated.View>
+          </KeyboardAvoidingView>
+        </Animated.View>
       </Modal>
     </SafeAreaView>
   );
@@ -229,10 +248,7 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
-  },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   signInCard: {
     borderTopLeftRadius: 24,

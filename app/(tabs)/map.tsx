@@ -1,6 +1,7 @@
 import * as Location from "expo-location";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
+  Animated,
   ActivityIndicator,
   Keyboard,
   Linking,
@@ -13,7 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Callout, Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
+import MapView, { Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 
@@ -175,11 +176,34 @@ function distanceMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
 
 type UserCoords = { latitude: number; longitude: number };
 
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
-  const markerRefs = useRef<Record<string, { showCallout?: () => void } | null>>({});
-  const [markerModalPantry, setMarkerModalPantry] = useState<PantryLocation | null>(null);
+  const markerRefs = useRef<Record<string, { showCallout?: () => void; hideCallout?: () => void } | null>>({});
+  const selectedMarkerIdRef = useRef<string | null>(null);
+  const [detailPantry, setDetailPantry] = useState<PantryLocation | null>(null);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const sheetAnim = useRef(new Animated.Value(0)).current;
+
+  function openDetail(pantry: PantryLocation) {
+    selectedMarkerIdRef.current = pantry.pantry_id;
+    setDetailPantry(pantry);
+    setSheetVisible(true);
+    sheetAnim.setValue(0);
+    Animated.spring(sheetAnim, { toValue: 1, useNativeDriver: true, bounciness: 4 }).start();
+  }
+
+  function closeDetail() {
+    if (selectedMarkerIdRef.current) {
+      markerRefs.current[selectedMarkerIdRef.current]?.hideCallout?.();
+      selectedMarkerIdRef.current = null;
+    }
+    Animated.timing(sheetAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => {
+      setSheetVisible(false);
+      setDetailPantry(null);
+    });
+  }
   const [userCoords, setUserCoords] = useState<UserCoords | null>(null);
   const [pantries, setPantries] = useState<PantryLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -490,70 +514,15 @@ useEffect(() => {
         showsUserLocation={!!userCoords}
         showsMyLocationButton={!!userCoords}
         mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
-        {visiblePantries.map((pantry) => {
-          const isTempClosed = pantry.temporary_closure === true;
-          const pantryAnn = hasActiveAnnouncement(pantry.pantry_id);
-          const { isOpen, closingTime, nextOpens } = getOpenStatus(pantry);
-          const statusText = isTempClosed
-            ? "Temporarily Closed"
-            : pantryAnn
-              ? pantryAnn.title
-              : isOpen
-                ? closingTime ? `Open until ${closingTime}` : "Open"
-                : nextOpens ?? "Closed";
-          const statusColor = isTempClosed
-            ? "#F59E0B"
-            : pantryAnn
-              ? getAnnColor(pantryAnn.category)
-              : isOpen ? "#16a34a" : "#dc2626";
-          const pinColor = isTempClosed
-            ? "#9CA3AF"
-            : pantryAnn
-              ? getAnnPinColor(pantryAnn.category)
-              : undefined;
-
-          return (
-            <Marker
-              ref={(ref) => {
-                markerRefs.current[pantry.pantry_id] = ref;
-              }}
-              key={pantry.pantry_id}
-              coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
-              title={pantry.name}
-              description={Platform.OS === "ios" ? `${pantry.street}, ${pantry.city}` : undefined}
-              pinColor={pinColor}
-              onPress={() => {
-                if (Platform.OS === "android") {
-                  setMarkerModalPantry(pantry);
-                }
-              }}
-              onCalloutPress={() => openDirections(pantry)}>
-              {Platform.OS === "ios" && (
-                <Callout tooltip>
-                  <View style={[styles.callout, { backgroundColor: cardBg }]}>
-                    <Text style={[styles.calloutName, { color: cardText }]} numberOfLines={1}>
-                      {pantry.name}
-                    </Text>
-                    <Text style={[styles.calloutAddress, { color: cardMuted }]} numberOfLines={1}>
-                      {pantry.street}, {pantry.city}
-                    </Text>
-                    <Text style={[styles.calloutStatus, { color: statusColor }]}>
-                      {statusText}
-                    </Text>
-                    {pantryAnn && (
-                      <Text style={[styles.calloutAnnBody, { color: cardMuted }]} numberOfLines={2}>
-                        {pantryAnn.body}
-                      </Text>
-                    )}
-                    <View style={styles.calloutDirectionsBtn}>
-                      <Text style={styles.calloutDirectionsBtnText}>Directions</Text>
-                    </View>
-                  </View>
-                </Callout>
-              )}
-            </Marker>
-          );
-        })}
+        {visiblePantries.map((pantry) => (
+          <Marker
+            key={pantry.pantry_id}
+            ref={(ref) => { markerRefs.current[pantry.pantry_id] = ref; }}
+            coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
+            pinColor={pantry.temporary_closure === true ? "#9CA3AF" : undefined}
+            onPress={() => openDetail(pantry)}
+          />
+        ))}
       </MapView>
 
       <View style={[styles.searchContainer, { top: insets.top + 8 }]} pointerEvents="box-none">
@@ -849,12 +818,17 @@ useEffect(() => {
           : displayAnn ? getAnnColor(displayAnn.category)
           : isOpen ? "#16a34a" : "#dc2626";
         return (
-          <View style={[styles.bottomCard, { bottom: 8, backgroundColor: cardBg }]}>
+          <Pressable
+            style={[styles.bottomCard, { bottom: 8, backgroundColor: cardBg }]}
+            onPress={() => openDetail(displayPantry)}>
             <View style={styles.cardBody}>
               <Text style={[styles.cardLabel, { color: cardMuted }]}>{displayLabel}</Text>
-              <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>
-                {displayPantry.name}
-              </Text>
+              <View style={styles.cardNameRow}>
+                <Text style={[styles.cardName, { color: cardText }]} numberOfLines={1}>
+                  {displayPantry.name}
+                </Text>
+                <Text style={[styles.cardChevron, { color: cardMuted }]}>›</Text>
+              </View>
               <Text style={[styles.cardAddress, { color: cardMuted }]} numberOfLines={1}>
                 {displayPantry.street}, {displayPantry.city}
               </Text>
@@ -866,67 +840,85 @@ useEffect(() => {
                   {displayMiles.toFixed(1)} mi
                 </Text>
               )}
-              <Pressable style={styles.directionsBtn} onPress={() => openDirections(displayPantry)}>
+              <Pressable style={styles.directionsBtn} onPress={(e) => { e.stopPropagation(); openDirections(displayPantry); }}>
                 <Text style={styles.directionsBtnText}>Directions</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         );
       })()}
 
-      {Platform.OS === "android" && (
-        <Modal
-          visible={!!markerModalPantry}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setMarkerModalPantry(null)}>
-          <Pressable
-            style={styles.markerModalOverlay}
-            onPress={() => setMarkerModalPantry(null)}>
-            {markerModalPantry && (() => {
-              const isTempClosed = markerModalPantry.temporary_closure === true;
-              const modalAnn = hasActiveAnnouncement(markerModalPantry.pantry_id);
-              const { isOpen, closingTime, nextOpens } = getOpenStatus(markerModalPantry);
-              const statusText = isTempClosed
-                ? "Temporarily Closed"
-                : modalAnn
-                  ? modalAnn.title
-                  : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
-              const statusColor = isTempClosed ? "#F59E0B"
-                : modalAnn ? getAnnColor(modalAnn.category)
-                : isOpen ? "#16a34a" : "#dc2626";
-              return (
-                <Pressable
-                  style={[styles.markerModalCard, { backgroundColor: cardBg }]}
-                  onPress={(e) => e.stopPropagation()}>
-                  <Text style={[styles.markerModalName, { color: cardText }]} numberOfLines={1}>
-                    {markerModalPantry.name}
-                  </Text>
-                  <Text style={[styles.markerModalAddress, { color: cardMuted }]} numberOfLines={1}>
-                    {markerModalPantry.street}, {markerModalPantry.city}
-                  </Text>
-                  <Text style={[styles.markerModalStatus, { color: statusColor }]}>
-                    {statusText}
-                  </Text>
-                  {modalAnn && (
-                    <Text style={[styles.markerModalAnnBody, { color: cardMuted }]} numberOfLines={3}>
-                      {modalAnn.body}
-                    </Text>
-                  )}
-                  <Pressable
-                    style={styles.markerModalDirectionsBtn}
-                    onPress={() => {
-                      openDirections(markerModalPantry);
-                      setMarkerModalPantry(null);
-                    }}>
-                    <Text style={styles.markerModalDirectionsBtnText}>Directions</Text>
+
+      <Modal
+        visible={sheetVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeDetail}>
+        <Animated.View
+          style={[styles.detailOverlay, { opacity: sheetAnim }]}
+          pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeDetail} />
+          {detailPantry && (() => {
+            const p = detailPantry;
+            const isTempClosed = p.temporary_closure === true;
+            const { isOpen, closingTime, nextOpens } = getOpenStatus(p);
+            const statusText = isTempClosed
+              ? "Temporarily Closed"
+              : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+            const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
+            const sortedHours = [...(p.pantry_op_hours ?? [])].sort((a, b) => {
+              const ai = WEEKDAYS.indexOf(String(a.weekday).toLowerCase().trim());
+              const bi = WEEKDAYS.indexOf(String(b.weekday).toLowerCase().trim());
+              return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+            });
+            const translateY = sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] });
+            return (
+              <Animated.View
+                style={[styles.detailSheet, { backgroundColor: cardBg, transform: [{ translateY }] }]}>
+                <View style={styles.detailHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.detailName, { color: cardText }]}>{p.name}</Text>
+                    {p.service_type ? (
+                      <View style={styles.detailTypeBadge}>
+                        <Text style={styles.detailTypeBadgeText}>{p.service_type}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Pressable onPress={closeDetail} style={styles.detailClose} hitSlop={12}>
+                    <Text style={[styles.detailCloseText, { color: cardMuted }]}>✕</Text>
                   </Pressable>
+                </View>
+
+                <Text style={[styles.detailAddress, { color: cardMuted }]}>
+                  {p.street}, {p.city}, {p.state} {p.zip}
+                </Text>
+
+                <Text style={[styles.detailStatus, { color: statusColor }]}>{statusText}</Text>
+
+                {sortedHours.length > 0 && (
+                  <View style={styles.detailHoursSection}>
+                    <Text style={[styles.detailHoursTitle, { color: cardMuted }]}>Hours</Text>
+                    {sortedHours.map((h, i) => (
+                      <View key={i} style={styles.detailHoursRow}>
+                        <Text style={[styles.detailHoursDay, { color: cardText }]}>
+                          {WEEKDAY_ABBREV[String(h.weekday).toLowerCase().trim()] ?? String(h.weekday).slice(0, 3)}
+                        </Text>
+                        <Text style={[styles.detailHoursTime, { color: cardMuted }]}>
+                          {formatTimeForDisplay(h.open_time)} – {formatTimeForDisplay(h.close_time)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <Pressable style={styles.detailDirectionsBtn} onPress={() => { openDirections(p); closeDetail(); }}>
+                  <Text style={styles.detailDirectionsBtnText}>Get Directions</Text>
                 </Pressable>
-              );
-            })()}
-          </Pressable>
-        </Modal>
-      )}
+              </Animated.View>
+            );
+          })()}
+        </Animated.View>
+      </Modal>
     </View>
   );
 }
@@ -1368,5 +1360,117 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 8,
     elevation: 4,
+  },
+  cardNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  cardChevron: {
+    fontSize: 20,
+    fontWeight: "300",
+    lineHeight: 22,
+    marginLeft: 2,
+  },
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+    pointerEvents: "box-none",
+  },
+  detailSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 36,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  detailHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(128,128,128,0.35)",
+    alignSelf: "center",
+    marginBottom: 8,
+  },
+  detailHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  detailName: {
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  detailTypeBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#2563EB",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 6,
+  },
+  detailTypeBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  detailClose: {
+    paddingTop: 2,
+  },
+  detailCloseText: {
+    fontSize: 18,
+    fontWeight: "400",
+  },
+  detailAddress: {
+    fontSize: 14,
+    marginTop: 2,
+  },
+  detailStatus: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  detailHoursSection: {
+    marginTop: 12,
+    gap: 6,
+  },
+  detailHoursTitle: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  detailHoursRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  detailHoursDay: {
+    fontSize: 14,
+    fontWeight: "600",
+    width: 40,
+  },
+  detailHoursTime: {
+    fontSize: 14,
+  },
+  detailDirectionsBtn: {
+    marginTop: 16,
+    backgroundColor: "#2563EB",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  detailDirectionsBtnText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

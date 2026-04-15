@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable, Modal,
   StyleSheet, ScrollView, Switch, ActivityIndicator, Alert,
@@ -25,6 +26,28 @@ async function geocodeAddress(street: string, city: string, state: string, zip: 
   console.log('Geocoding response status:', data.status, data.error_message ?? '');
   if (data.status !== 'OK' || !data.results?.[0]?.geometry?.location) return null;
   return data.results[0].geometry.location;
+}
+
+function formatAdminTime(t: string): string {
+  const parts = t.split(':');
+  const h = parseInt(parts[0] ?? '0', 10);
+  const m = parseInt(parts[1] ?? '0', 10);
+  const mm = m.toString().padStart(2, '0');
+  if (h === 0) return `12:${mm} AM`;
+  if (h < 12) return `${h}:${mm} AM`;
+  if (h === 12) return `12:${mm} PM`;
+  return `${h - 12}:${mm} PM`;
+}
+
+function timeStringToDate(t: string): Date {
+  const [h, m] = t.split(':').map(Number);
+  const d = new Date();
+  d.setHours(h ?? 9, m ?? 0, 0, 0);
+  return d;
+}
+
+function dateToTimeString(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -132,6 +155,8 @@ export default function AdminScreen() {
   const [editTarget, setEditTarget] = useState<PantryLocation | null>(null);
   const [form, setForm] = useState<PantryForm>(EMPTY_FORM);
   const [newHour, setNewHour] = useState<FormHour>({ weekday: 'monday', open_time: '09:00', close_time: '17:00' });
+  const [showTimePicker, setShowTimePicker] = useState<'open' | 'close' | null>(null);
+  const formScrollRef = useRef<ScrollView>(null);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -926,6 +951,7 @@ export default function AdminScreen() {
             </View>
 
             <ScrollView
+              ref={formScrollRef}
               style={{ flex: 1 }}
               contentContainerStyle={[styles.formContent, { paddingBottom: insets.bottom + 32 }]}
               keyboardShouldPersistTaps="handled">
@@ -1016,7 +1042,7 @@ export default function AdminScreen() {
                           {getDayAbbrev(h.weekday)}
                         </Text>
                         <Text style={[styles.hourTime, { color: mutedColor }]}>
-                          {h.open_time} – {h.close_time}
+                          {formatAdminTime(h.open_time)} – {formatAdminTime(h.close_time)}
                         </Text>
                         <Pressable onPress={() => removeHourSlot(i)} style={styles.removeHourBtn}>
                           <Text style={styles.removeHourBtnText}>✕</Text>
@@ -1054,24 +1080,30 @@ export default function AdminScreen() {
                 <View style={styles.timeInputRow}>
                   <View style={styles.timeInputGroup}>
                     <Text style={[styles.timeInputLabel, { color: mutedColor }]}>Open</Text>
-                    <TextInput
-                      style={[styles.timeInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
-                      value={newHour.open_time}
-                      onChangeText={(v) => setNewHour((h) => ({ ...h, open_time: v }))}
-                      placeholder="09:00"
-                      placeholderTextColor={mutedColor}
-                    />
+                    <Pressable
+                      style={[styles.timeInput, { backgroundColor: inputBg, borderColor, justifyContent: 'center' }]}
+                      onPress={() => {
+                        setShowTimePicker('open');
+                        setTimeout(() => formScrollRef.current?.scrollToEnd({ animated: true }), 50);
+                      }}>
+                      <Text style={[{ color: textColor, textAlign: 'center', fontSize: 15 }]}>
+                        {formatAdminTime(newHour.open_time)}
+                      </Text>
+                    </Pressable>
                   </View>
                   <Text style={[styles.timeSeparator, { color: mutedColor }]}>–</Text>
                   <View style={styles.timeInputGroup}>
                     <Text style={[styles.timeInputLabel, { color: mutedColor }]}>Close</Text>
-                    <TextInput
-                      style={[styles.timeInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
-                      value={newHour.close_time}
-                      onChangeText={(v) => setNewHour((h) => ({ ...h, close_time: v }))}
-                      placeholder="17:00"
-                      placeholderTextColor={mutedColor}
-                    />
+                    <Pressable
+                      style={[styles.timeInput, { backgroundColor: inputBg, borderColor, justifyContent: 'center' }]}
+                      onPress={() => {
+                        setShowTimePicker('close');
+                        setTimeout(() => formScrollRef.current?.scrollToEnd({ animated: true }), 50);
+                      }}>
+                      <Text style={[{ color: textColor, textAlign: 'center', fontSize: 15 }]}>
+                        {formatAdminTime(newHour.close_time)}
+                      </Text>
+                    </Pressable>
                   </View>
                   <Pressable
                     style={({ pressed }) => [styles.addSlotBtn, pressed && { opacity: 0.8 }]}
@@ -1079,6 +1111,39 @@ export default function AdminScreen() {
                     <Text style={styles.addSlotBtnText}>+ Add</Text>
                   </Pressable>
                 </View>
+
+                {showTimePicker && (
+                  Platform.OS === 'ios' ? (
+                    <View style={[styles.iosPickerContainer, { backgroundColor: inputBg, borderColor }]}>
+                      <Pressable onPress={() => setShowTimePicker(null)} style={styles.iosPickerDoneBtn}>
+                        <Text style={styles.iosPickerDoneText}>Done</Text>
+                      </Pressable>
+                      <DateTimePicker
+                        mode="time"
+                        display="spinner"
+                        value={timeStringToDate(showTimePicker === 'open' ? newHour.open_time : newHour.close_time)}
+                        onChange={(_, date) => {
+                          if (date) {
+                            const field = showTimePicker === 'open' ? 'open_time' : 'close_time';
+                            setNewHour((h) => ({ ...h, [field]: dateToTimeString(date) }));
+                          }
+                        }}
+                        textColor={textColor}
+                      />
+                    </View>
+                  ) : (
+                    <DateTimePicker
+                      mode="time"
+                      display="clock"
+                      value={timeStringToDate(showTimePicker === 'open' ? newHour.open_time : newHour.close_time)}
+                      onChange={(_, date) => {
+                        const field = showTimePicker === 'open' ? 'open_time' : 'close_time';
+                        setShowTimePicker(null);
+                        if (date) setNewHour((h) => ({ ...h, [field]: dateToTimeString(date) }));
+                      }}
+                    />
+                  )
+                )}
               </View>
 
               {/* Delete (edit mode only) */}
@@ -1397,6 +1462,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   timeSeparator: { fontSize: 18, marginTop: 16 },
+  iosPickerContainer: {
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  iosPickerDoneBtn: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  iosPickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
   addSlotBtn: {
     height: 40,
     paddingHorizontal: 16,
