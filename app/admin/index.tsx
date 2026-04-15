@@ -8,7 +8,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ExpoCrypto from 'expo-crypto';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/lib/supabase';
 import type { PantryLocation, Announcement, AnnouncementCategory } from '@/types/pantry';
@@ -172,6 +171,8 @@ export default function AdminScreen() {
   const [expiresPickerMode, setExpiresPickerMode] = useState<'date' | 'time'>('date');
   const [showSchedulePicker, setShowSchedulePicker] = useState(false);
   const [schedulePickerMode, setSchedulePickerMode] = useState<'date' | 'time'>('date');
+  const [showPantryPicker, setShowPantryPicker] = useState(false);
+  const [pantryPickerSearch, setPantryPickerSearch] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -569,42 +570,45 @@ export default function AdminScreen() {
                             {catInfo.label}
                           </Text>
                         </View>
-                        {isLive && !isExpired && (
-                          <View style={[styles.annDraftBadge, { backgroundColor: '#F0FDF4' }]}>
-                            <Text style={[styles.annDraftBadgeText, { color: '#16a34a' }]}>Live</Text>
-                          </View>
-                        )}
-                        {isScheduled && !isScheduledLive && (
-                          <View style={[styles.annDraftBadge, { backgroundColor: '#EFF6FF' }]}>
-                            <Text style={[styles.annDraftBadgeText, { color: '#2563EB' }]}>Scheduled</Text>
-                          </View>
-                        )}
-                        {!isLive && !isScheduled && (
-                          <View style={[styles.annDraftBadge, { backgroundColor: borderColor }]}>
-                            <Text style={[styles.annDraftBadgeText, { color: mutedColor }]}>Draft</Text>
-                          </View>
-                        )}
-                        {isExpired && (
-                          <View style={[styles.annDraftBadge, { backgroundColor: '#FEF2F2' }]}>
-                            <Text style={[styles.annDraftBadgeText, { color: '#EF4444' }]}>Expired</Text>
-                          </View>
-                        )}
                       </View>
                       <Text style={[styles.rowName, { color: textColor }]} numberOfLines={1}>
                         {item.title}
                       </Text>
                       <Text style={[styles.rowAddress, { color: mutedColor }]} numberOfLines={1}>
                         {getPantryName(item.pantry_id)}
-                        {isScheduled
-                          ? ` · Publishes ${formatDateTime(new Date(item.scheduled_for!))}`
-                          : item.expires_at ? ` · Expires ${formatDateTime(new Date(item.expires_at))}` : ''}
                       </Text>
+                      {(isScheduled || !!item.expires_at) && (
+                        <Text style={[styles.rowAddress, { color: mutedColor }]} numberOfLines={1}>
+                          {isScheduled
+                            ? `Publishes ${formatDateTime(new Date(item.scheduled_for!))}`
+                            : `Expires ${formatDateTime(new Date(item.expires_at!))}`}
+                        </Text>
+                      )}
                     </View>
-                    <Pressable
-                      style={({ pressed }) => [styles.editBtn, { borderColor }, pressed && { opacity: 0.7 }]}
-                      onPress={() => openEditAnn(item)}>
-                      <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
-                    </Pressable>
+                    <View style={styles.annRowActions}>
+                      {isExpired ? (
+                        <View style={[styles.annDraftBadge, { backgroundColor: '#FEF2F2' }]}>
+                          <Text style={[styles.annDraftBadgeText, { color: '#EF4444' }]}>Expired</Text>
+                        </View>
+                      ) : isLive ? (
+                        <View style={[styles.annDraftBadge, { backgroundColor: '#F0FDF4' }]}>
+                          <Text style={[styles.annDraftBadgeText, { color: '#16a34a' }]}>Live</Text>
+                        </View>
+                      ) : isScheduled && !isScheduledLive ? (
+                        <View style={[styles.annDraftBadge, { backgroundColor: '#EFF6FF' }]}>
+                          <Text style={[styles.annDraftBadgeText, { color: '#2563EB' }]}>Scheduled</Text>
+                        </View>
+                      ) : (
+                        <View style={[styles.annDraftBadge, { backgroundColor: borderColor }]}>
+                          <Text style={[styles.annDraftBadgeText, { color: mutedColor }]}>Draft</Text>
+                        </View>
+                      )}
+                      <Pressable
+                        style={({ pressed }) => [styles.editBtn, { borderColor }, pressed && { opacity: 0.7 }]}
+                        onPress={() => openEditAnn(item)}>
+                        <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 );
               }}
@@ -695,23 +699,12 @@ export default function AdminScreen() {
               <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
                 <Pressable
                   style={styles.fieldRow}
-                  onPress={() => {
-                    const options = [
-                      { text: 'All Pantries (App-Wide)', onPress: () => setAnnForm((f) => ({ ...f, pantry_id: null })) },
-                      ...pantries.map((p) => ({
-                        text: p.name,
-                        onPress: () => setAnnForm((f) => ({ ...f, pantry_id: p.pantry_id })),
-                      })),
-                    ];
-                    Alert.alert('Select Pantry', 'Choose which pantry this announcement is for', [
-                      ...options,
-                      { text: 'Cancel', style: 'cancel' },
-                    ]);
-                  }}>
+                  onPress={() => { setPantryPickerSearch(''); setShowPantryPicker(true); }}>
                   <Text style={[styles.fieldLabel, { color: mutedColor }]}>Pantry</Text>
-                  <Text style={[styles.fieldInput, { color: textColor }]}>
+                  <Text style={[styles.fieldInput, { color: textColor }]} numberOfLines={1}>
                     {getPantryName(annForm.pantry_id)}
                   </Text>
+                  <Text style={[styles.pickerChevron, { color: mutedColor }]}>›</Text>
                 </Pressable>
               </View>
 
@@ -921,6 +914,71 @@ export default function AdminScreen() {
               </Pressable>
             </Pressable>
           )}
+
+          {/* Pantry Picker — nested inside ann form so it presents from within the pageSheet */}
+          <Modal
+            visible={showPantryPicker}
+            animationType="slide"
+            presentationStyle="pageSheet"
+            onRequestClose={() => setShowPantryPicker(false)}>
+            <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]} edges={['top']}>
+              <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
+                <Pressable onPress={() => setShowPantryPicker(false)}>
+                  <Text style={[styles.modalCancel, { color: mutedColor }]}>Cancel</Text>
+                </Pressable>
+                <Text style={[styles.modalTitle, { color: textColor }]}>Select Pantry</Text>
+                <View style={{ minWidth: 70 }} />
+              </View>
+
+              <View style={[styles.pantryPickerSearch, { backgroundColor: cardBg, borderColor }]}>
+                <TextInput
+                  style={[styles.pantryPickerSearchInput, { color: textColor }]}
+                  placeholder="Search pantries…"
+                  placeholderTextColor={mutedColor}
+                  value={pantryPickerSearch}
+                  onChangeText={setPantryPickerSearch}
+                  autoCapitalize="none"
+                  clearButtonMode="while-editing"
+                />
+              </View>
+
+              <FlatList
+                data={[
+                  { pantry_id: null, name: 'All Pantries (App-Wide)' } as { pantry_id: string | null; name: string },
+                  ...pantries
+                    .filter((p) => !pantryPickerSearch.trim() || p.name.toLowerCase().includes(pantryPickerSearch.toLowerCase()))
+                    .sort((a, b) => a.name.localeCompare(b.name)),
+                ].filter((p) => p.pantry_id !== null || !pantryPickerSearch.trim())}
+                keyExtractor={(item) => item.pantry_id ?? '__all__'}
+                ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: borderColor }]} />}
+                renderItem={({ item }) => {
+                  const isSelected = annForm.pantry_id === item.pantry_id;
+                  return (
+                    <Pressable
+                      style={({ pressed }) => [styles.pantryPickerRow, pressed && { opacity: 0.6 }]}
+                      onPress={() => {
+                        setAnnForm((f) => ({ ...f, pantry_id: item.pantry_id }));
+                        setShowPantryPicker(false);
+                      }}>
+                      <View style={styles.pantryPickerRowContent}>
+                        <Text style={[styles.pantryPickerRowName, { color: textColor }, item.pantry_id === null && { fontWeight: '700' }]}>
+                          {item.name}
+                        </Text>
+                        {item.pantry_id === null && (
+                          <Text style={[styles.pantryPickerRowSub, { color: mutedColor }]}>
+                            Shown to all users
+                          </Text>
+                        )}
+                      </View>
+                      {isSelected && (
+                        <Text style={styles.pantryPickerCheck}>✓</Text>
+                      )}
+                    </Pressable>
+                  );
+                }}
+              />
+            </SafeAreaView>
+          </Modal>
         </SafeAreaView>
       </Modal>
 
@@ -1239,7 +1297,8 @@ const styles = StyleSheet.create({
 
   // Announcement list items
   emptyText: { padding: 32, fontSize: 15, textAlign: 'center' },
-  annRowHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  annRowHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  annRowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   annCategoryBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   annCategoryBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
   annDraftBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
@@ -1541,4 +1600,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmCancelText: { fontSize: 16, fontWeight: '400' },
+  pickerChevron: { fontSize: 18, fontWeight: '300' },
+  pantryPickerSearch: {
+    margin: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  pantryPickerSearchInput: { fontSize: 15 },
+  pantryPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  pantryPickerRowContent: { flex: 1, gap: 2 },
+  pantryPickerRowName: { fontSize: 15 },
+  pantryPickerRowSub: { fontSize: 12 },
+  pantryPickerCheck: { fontSize: 18, color: '#2563EB', fontWeight: '600', marginLeft: 12 },
 });

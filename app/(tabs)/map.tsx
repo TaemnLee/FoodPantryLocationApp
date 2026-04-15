@@ -514,15 +514,20 @@ useEffect(() => {
         showsUserLocation={!!userCoords}
         showsMyLocationButton={!!userCoords}
         mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
-        {visiblePantries.map((pantry) => (
-          <Marker
-            key={pantry.pantry_id}
-            ref={(ref) => { markerRefs.current[pantry.pantry_id] = ref; }}
-            coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
-            pinColor={pantry.temporary_closure === true ? "#9CA3AF" : undefined}
-            onPress={() => openDetail(pantry)}
-          />
-        ))}
+        {visiblePantries.map((pantry) => {
+          const isTempClosed = pantry.temporary_closure === true;
+          const pantryAnn = hasActiveAnnouncement(pantry.pantry_id);
+          const pinColor = isTempClosed ? "#9CA3AF" : pantryAnn ? getAnnPinColor(pantryAnn.category) : undefined;
+          return (
+            <Marker
+              key={pantry.pantry_id}
+              ref={(ref) => { markerRefs.current[pantry.pantry_id] = ref; }}
+              coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
+              pinColor={pinColor}
+              onPress={() => openDetail(pantry)}
+            />
+          );
+        })}
       </MapView>
 
       <View style={[styles.searchContainer, { top: insets.top + 8 }]} pointerEvents="box-none">
@@ -894,6 +899,26 @@ useEffect(() => {
                 </Text>
 
                 <Text style={[styles.detailStatus, { color: statusColor }]}>{statusText}</Text>
+
+                {(() => {
+                  const pantryAnns = getAnnouncementsForPantry(p.pantry_id);
+                  if (!pantryAnns.length) return null;
+                  return (
+                    <View style={styles.detailAnnsSection}>
+                      {pantryAnns.map((ann) => {
+                        const color = getAnnColor(ann.category);
+                        return (
+                          <View key={ann.id} style={[styles.detailAnnItem, { borderLeftColor: color }]}>
+                            <Text style={[styles.detailAnnTitle, { color: cardText }]}>{ann.title}</Text>
+                            {ann.body ? (
+                              <Text style={[styles.detailAnnBody, { color: cardMuted }]}>{ann.body}</Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  );
+                })()}
 
                 {sortedHours.length > 0 && (
                   <View style={styles.detailHoursSection}>
@@ -1472,5 +1497,22 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+  },
+  detailAnnsSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  detailAnnItem: {
+    borderLeftWidth: 3,
+    paddingLeft: 10,
+    gap: 2,
+  },
+  detailAnnTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  detailAnnBody: {
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
