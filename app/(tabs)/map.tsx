@@ -194,6 +194,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const markerRefs = useRef<Record<string, { showCallout?: () => void; hideCallout?: () => void } | null>>({});
+  const filterScrollRef = useRef<ScrollView>(null);
   const selectedMarkerIdRef = useRef<string | null>(null);
   const [detailPantry, setDetailPantry] = useState<PantryLocation | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -228,7 +229,8 @@ export default function MapScreen() {
   const [filterMaxMiles, setFilterMaxMiles] = useState<number | null>(null);
   const [filterTime, setFilterTime] = useState<string | null>(null);
   const [filterTimeDate, setFilterTimeDate] = useState<Date>(makeNoon);
-  const [expandedFilter, setExpandedFilter] = useState<"when" | "distance" | null>(null);
+  const [filterFoodType, setFilterFoodType] = useState<keyof Omit<PantryInventory, 'pantry_id' | 'name' | 'last_updated'> | null>(null);
+  const [expandedFilter, setExpandedFilter] = useState<"when" | "distance" | "food" | null>(null);
   const [inventories, setInventories] = useState<PantryInventory[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [annDismissed, setAnnDismissed] = useState<Set<string>>(new Set());
@@ -257,6 +259,12 @@ export default function MapScreen() {
         (p) => distanceMiles(userCoords.latitude, userCoords.longitude, p.latitude, p.longitude) <= filterMaxMiles
       );
     }
+    if (filterFoodType !== null) {
+      filtered = filtered.filter((p) => {
+        const inv = inventories.find((i) => i.pantry_id === p.pantry_id);
+        return inv?.[filterFoodType] === true;
+      });
+    }
     if (userCoords) {
       return [...filtered].sort(
         (a, b) =>
@@ -265,7 +273,7 @@ export default function MapScreen() {
       );
     }
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-  }, [pantries, searchQuery, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles]);
+  }, [pantries, searchQuery, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles, filterFoodType, inventories]);
 
   const visiblePantries = useMemo(() => {
     let filtered = [...pantries];
@@ -283,8 +291,14 @@ export default function MapScreen() {
         (p) => distanceMiles(userCoords.latitude, userCoords.longitude, p.latitude, p.longitude) <= filterMaxMiles
       );
     }
+    if (filterFoodType !== null) {
+      filtered = filtered.filter((p) => {
+        const inv = inventories.find((i) => i.pantry_id === p.pantry_id);
+        return inv?.[filterFoodType] === true;
+      });
+    }
     return filtered;
-  }, [pantries, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles]);
+  }, [pantries, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles, filterFoodType, inventories]);
 
   const showSearchDropdown = searchFocused;
 
@@ -494,6 +508,12 @@ useEffect(() => {
 }, []);
 
   useEffect(() => {
+    if (filterFoodType !== null) {
+      filterScrollRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [filterFoodType]);
+
+  useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       if (status !== "granted") return;
       Location.getCurrentPositionAsync({}).then(({ coords }) => {
@@ -576,6 +596,7 @@ useEffect(() => {
         />
 
         <ScrollView
+          ref={filterScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.filterRow}
@@ -616,6 +637,14 @@ useEffect(() => {
             onPress={() => setExpandedFilter(expandedFilter === "distance" ? null : "distance")}>
             <Text style={[styles.filterChipText, chipTextStyle, (filterMaxMiles !== null || expandedFilter === "distance") && styles.filterChipTextActive]}>
               {filterMaxMiles !== null ? `${filterMaxMiles} mi` : "Distance"} ▾
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.filterChip, chipStyle, (filterFoodType !== null || expandedFilter === "food") && styles.filterChipActive]}
+            onPress={() => setExpandedFilter(expandedFilter === "food" ? null : "food")}>
+            <Text style={[styles.filterChipText, chipTextStyle, (filterFoodType !== null || expandedFilter === "food") && styles.filterChipTextActive]}>
+              {filterFoodType !== null ? (INV_LABELS.find((c) => c.key === filterFoodType)?.label ?? "Food") : "Food"} ▾
             </Text>
           </Pressable>
         </ScrollView>
@@ -682,6 +711,7 @@ useEffect(() => {
                 setFilterTimeDate(makeNoon());
                 setFilterOpenNow(false);
                 setFilterMaxMiles(null);
+                setFilterFoodType(null);
                 setExpandedFilter(null);
               }}
               style={styles.filterPickerClear}>
@@ -702,6 +732,24 @@ useEffect(() => {
                 }}>
                 <Text style={[styles.filterPickerChipText, chipTextStyle, filterMaxMiles === miles && styles.filterChipTextActive]}>
                   {miles} mi
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {expandedFilter === "food" && (
+          <View style={[styles.filterPicker, { backgroundColor: cardBg }]}>
+            {INV_LABELS.map((cat) => (
+              <Pressable
+                key={cat.key}
+                style={[styles.filterPickerChip, chipStyle, filterFoodType === cat.key && styles.filterChipActive]}
+                onPress={() => {
+                  setFilterFoodType(filterFoodType === cat.key ? null : cat.key);
+                  setExpandedFilter(null);
+                }}>
+                <Text style={[styles.filterPickerChipText, chipTextStyle, filterFoodType === cat.key && styles.filterChipTextActive]}>
+                  {cat.label}
                 </Text>
               </Pressable>
             ))}
