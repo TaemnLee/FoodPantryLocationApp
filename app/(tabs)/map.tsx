@@ -1,3 +1,4 @@
+import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Location from "expo-location";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
@@ -20,7 +21,7 @@ import { useFocusEffect } from "expo-router";
 
 import { useThemeColor } from "@/hooks/use-theme-color";
 import { supabase } from "@/lib/supabase";
-import type { PantryLocation, PantryOpHours, Announcement } from "@/types/pantry";
+import type { PantryLocation, PantryOpHours, Announcement, PantryInventory } from "@/types/pantry";
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_ABBREV: Record<string, string> = {
@@ -133,13 +134,25 @@ function opensLaterToday(pantry: PantryLocation): boolean {
   return todaySessions.some((s) => timeToMinutes(s.open_time) > nowMins);
 }
 
-const TIME_PRESETS = [
-  { label: "8 AM", value: "08:00" },
-  { label: "10 AM", value: "10:00" },
-  { label: "12 PM", value: "12:00" },
-  { label: "2 PM", value: "14:00" },
-  { label: "4 PM", value: "16:00" },
-  { label: "6 PM", value: "18:00" },
+function makeNoon(): Date {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  return d;
+}
+
+const INV_LABELS: { key: keyof Omit<PantryInventory, 'pantry_id' | 'name' | 'last_updated'>; label: string }[] = [
+  { key: 'canned_food', label: 'Canned Food' },
+  { key: 'dry_grains', label: 'Dry Grains' },
+  { key: 'cereal', label: 'Cereal' },
+  { key: 'dairy', label: 'Dairy' },
+  { key: 'eggs', label: 'Eggs' },
+  { key: 'fresh_produce', label: 'Fresh Produce' },
+  { key: 'fresh_protein', label: 'Fresh Protein' },
+  { key: 'frozen_food', label: 'Frozen Food' },
+  { key: 'bread', label: 'Bread' },
+  { key: 'beverages', label: 'Beverages' },
+  { key: 'baby_items', label: 'Baby Items' },
+  { key: 'snacks', label: 'Snacks' },
 ];
 
 const LICKING_COUNTY_REGION: Region = {
@@ -214,7 +227,9 @@ export default function MapScreen() {
   const [filterDayLabel, setFilterDayLabel] = useState<string | null>(null);
   const [filterMaxMiles, setFilterMaxMiles] = useState<number | null>(null);
   const [filterTime, setFilterTime] = useState<string | null>(null);
-  const [expandedFilter, setExpandedFilter] = useState<"day" | "distance" | "time" | null>(null);
+  const [filterTimeDate, setFilterTimeDate] = useState<Date>(makeNoon);
+  const [expandedFilter, setExpandedFilter] = useState<"when" | "distance" | null>(null);
+  const [inventories, setInventories] = useState<PantryInventory[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [annDismissed, setAnnDismissed] = useState<Set<string>>(new Set());
   const [annDetailModal, setAnnDetailModal] = useState<Announcement | null>(null);
@@ -314,7 +329,7 @@ export default function MapScreen() {
   }, [announcements]);
 
   const visibleBannerAnnouncements = useMemo(() => {
-    return activeAnnouncements.filter((a) => !annDismissed.has(a.id));
+    return activeAnnouncements.filter((a) => a.pantry_id === null && !annDismissed.has(a.id));
   }, [activeAnnouncements, annDismissed]);
 
   function getAnnouncementsForPantry(pantryId: string): Announcement[] {
@@ -359,6 +374,11 @@ export default function MapScreen() {
     setAnnouncements(data ?? []);
   }
 
+  async function fetchInventories() {
+    const { data } = await supabase.from("pantry_inventory").select("*");
+    setInventories(data ?? []);
+  }
+
 async function fetchPantries() {
   try {
     const [{ data: locations, error: locError }, { data: hours, error: hoursError }, { data: mains }] =
@@ -399,11 +419,13 @@ async function fetchPantries() {
 useEffect(() => {
   fetchPantries();
   fetchAnnouncements();
+  fetchInventories();
 }, []);
 
 useFocusEffect(useCallback(() => {
   fetchPantries();
   fetchAnnouncements();
+  fetchInventories();
 }, []));
 
 useEffect(() => {
@@ -451,6 +473,17 @@ useEffect(() => {
       },
       () => {
         fetchAnnouncements();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pantry_inventory",
+      },
+      () => {
+        fetchInventories();
       }
     )
     .subscribe();
@@ -553,7 +586,7 @@ useEffect(() => {
             onPress={() => {
               const next = !filterOpenNow;
               setFilterOpenNow(next);
-              if (next) { setFilterDay(null); setFilterDayLabel(null); setFilterTime(null); }
+              if (next) { setFilterDay(null); setFilterDayLabel(null); setFilterTime(null); setFilterTimeDate(makeNoon()); }
               setExpandedFilter(null);
             }}>
             <Text style={[styles.filterChipText, chipTextStyle, filterOpenNow && styles.filterChipTextActive]}>
@@ -562,18 +595,13 @@ useEffect(() => {
           </Pressable>
 
           <Pressable
-            style={[styles.filterChip, chipStyle, (filterDay !== null || expandedFilter === "day") && styles.filterChipActive]}
-            onPress={() => setExpandedFilter(expandedFilter === "day" ? null : "day")}>
-            <Text style={[styles.filterChipText, chipTextStyle, (filterDay !== null || expandedFilter === "day") && styles.filterChipTextActive]}>
-              {filterDay !== null ? (filterDayLabel ?? WEEKDAY_ABBREV[WEEKDAYS[filterDay]]) : "Day"} ▾
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.filterChip, chipStyle, (filterTime !== null || expandedFilter === "time") && styles.filterChipActive]}
-            onPress={() => setExpandedFilter(expandedFilter === "time" ? null : "time")}>
-            <Text style={[styles.filterChipText, chipTextStyle, (filterTime !== null || expandedFilter === "time") && styles.filterChipTextActive]}>
-              {filterTime !== null ? (TIME_PRESETS.find((t) => t.value === filterTime)?.label ?? filterTime) : "Time"} ▾
+            style={[styles.filterChip, chipStyle, (filterDay !== null || filterTime !== null || expandedFilter === "when") && styles.filterChipActive]}
+            onPress={() => setExpandedFilter(expandedFilter === "when" ? null : "when")}>
+            <Text style={[styles.filterChipText, chipTextStyle, (filterDay !== null || filterTime !== null || expandedFilter === "when") && styles.filterChipTextActive]}>
+              {[
+                filterDay !== null ? (filterDayLabel ?? WEEKDAY_ABBREV[WEEKDAYS[filterDay]]) : null,
+                filterTime !== null ? formatTimeForDisplay(filterTime) : null,
+              ].filter(Boolean).join(" ") || "When"} ▾
             </Text>
           </Pressable>
 
@@ -592,59 +620,73 @@ useEffect(() => {
           </Pressable>
         </ScrollView>
 
-        {expandedFilter === "day" && (
-          <View style={[styles.filterPicker, { backgroundColor: cardBg }]}>
-            {[
-              { label: "Today", index: new Date().getDay() },
-              { label: "Tomorrow", index: (new Date().getDay() + 1) % 7 },
-              ...WEEKDAYS.map((day, i) => ({ label: WEEKDAY_ABBREV[day], index: i })),
-            ].map(({ label, index }) => {
-              const isActive = filterDay === index && filterDayLabel === label;
-              return (
-                <Pressable
-                  key={label}
-                  style={[styles.filterPickerChip, chipStyle, isActive && styles.filterChipActive]}
-                  onPress={() => {
-                    if (isActive) {
-                      setFilterDay(null);
-                      setFilterDayLabel(null);
-                    } else {
-                      setFilterDay(index);
-                      setFilterDayLabel(label);
-                      setFilterOpenNow(false);
-                    }
-                    setExpandedFilter(null);
-                  }}>
-                  <Text style={[styles.filterPickerChipText, chipTextStyle, isActive && styles.filterChipTextActive]}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-
-        {expandedFilter === "time" && (
-          <View style={[styles.filterPicker, { backgroundColor: cardBg }]}>
-            {TIME_PRESETS.map((preset) => (
-              <Pressable
-                key={preset.value}
-                style={[styles.filterPickerChip, chipStyle, filterTime === preset.value && styles.filterChipActive]}
-                onPress={() => {
-                  const next = filterTime === preset.value ? null : preset.value;
-                  setFilterTime(next);
-                  setFilterOpenNow(false);
-                  if (next !== null && filterDay === null) {
-                    setFilterDay(new Date().getDay());
-                    setFilterDayLabel("Today");
-                  }
-                  setExpandedFilter(null);
-                }}>
-                <Text style={[styles.filterPickerChipText, chipTextStyle, filterTime === preset.value && styles.filterChipTextActive]}>
-                  {preset.label}
-                </Text>
-              </Pressable>
-            ))}
+        {expandedFilter === "when" && (
+          <View style={[styles.filterPicker, { backgroundColor: cardBg, gap: 0 }]}>
+            <Text style={[styles.filterPickerSectionLabel, { color: cardMuted }]}>Day</Text>
+            <View style={styles.filterPickerRow}>
+              {[
+                { label: "Today", index: new Date().getDay() },
+                { label: "Tomorrow", index: (new Date().getDay() + 1) % 7 },
+                ...WEEKDAYS.map((day, i) => ({ label: WEEKDAY_ABBREV[day], index: i })),
+              ].map(({ label, index }) => {
+                const isActive = filterDay === index && filterDayLabel === label;
+                return (
+                  <Pressable
+                    key={label}
+                    style={[styles.filterPickerChip, chipStyle, isActive && styles.filterChipActive]}
+                    onPress={() => {
+                      if (isActive) {
+                        setFilterDay(null);
+                        setFilterDayLabel(null);
+                      } else {
+                        setFilterDay(index);
+                        setFilterDayLabel(label);
+                        setFilterOpenNow(false);
+                      }
+                    }}>
+                    <Text style={[styles.filterPickerChipText, chipTextStyle, isActive && styles.filterChipTextActive]}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={[styles.filterPickerDivider, { backgroundColor: cardMuted }]} />
+            <Text style={[styles.filterPickerSectionLabel, { color: cardMuted }]}>
+              Time{filterTime !== null ? ` — ${formatTimeForDisplay(filterTime)}` : ""}
+            </Text>
+            <DateTimePicker
+              mode="time"
+              display="spinner"
+              value={filterTimeDate}
+              minuteInterval={30}
+              onChange={(_e, date) => {
+                if (!date) return;
+                setFilterTimeDate(date);
+                const h = String(date.getHours()).padStart(2, "0");
+                const m = String(date.getMinutes()).padStart(2, "0");
+                setFilterTime(`${h}:${m}`);
+                setFilterOpenNow(false);
+                if (filterDay === null) {
+                  setFilterDay(new Date().getDay());
+                  setFilterDayLabel("Today");
+                }
+              }}
+              textColor={cardText}
+            />
+            <Pressable
+              onPress={() => {
+                setFilterDay(null);
+                setFilterDayLabel(null);
+                setFilterTime(null);
+                setFilterTimeDate(makeNoon());
+                setFilterOpenNow(false);
+                setFilterMaxMiles(null);
+                setExpandedFilter(null);
+              }}
+              style={styles.filterPickerClear}>
+              <Text style={styles.filterPickerClearText}>Reset All Filters</Text>
+            </Pressable>
           </View>
         )}
 
@@ -711,7 +753,7 @@ useEffect(() => {
         )}
       </View>
 
-      {showSearchDropdown && (
+      {(showSearchDropdown || expandedFilter !== null) && (
         <Pressable
           style={styles.searchOverlay}
           onPress={() => {
@@ -877,6 +919,8 @@ useEffect(() => {
               return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
             });
             const translateY = sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] });
+            const inv = inventories.find((i) => i.pantry_id === p.pantry_id);
+            const availableItems = inv ? INV_LABELS.filter((c) => inv[c.key]) : [];
             return (
               <Animated.View
                 style={[styles.detailSheet, { backgroundColor: cardBg, transform: [{ translateY }] }]}>
@@ -894,51 +938,76 @@ useEffect(() => {
                   </Pressable>
                 </View>
 
-                <Text style={[styles.detailAddress, { color: cardMuted }]}>
-                  {p.street}, {p.city}, {p.state} {p.zip}
-                </Text>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  bounces={false}
+                  contentContainerStyle={styles.detailScrollContent}>
 
-                <Text style={[styles.detailStatus, { color: statusColor }]}>{statusText}</Text>
+                  <Text style={[styles.detailAddress, { color: cardMuted }]}>
+                    {p.street}, {p.city}, {p.state} {p.zip}
+                  </Text>
 
-                {(() => {
-                  const pantryAnns = getAnnouncementsForPantry(p.pantry_id);
-                  if (!pantryAnns.length) return null;
-                  return (
-                    <View style={styles.detailAnnsSection}>
-                      {pantryAnns.map((ann) => {
-                        const color = getAnnColor(ann.category);
-                        return (
-                          <View key={ann.id} style={[styles.detailAnnItem, { borderLeftColor: color }]}>
-                            <Text style={[styles.detailAnnTitle, { color: cardText }]}>{ann.title}</Text>
-                            {ann.body ? (
-                              <Text style={[styles.detailAnnBody, { color: cardMuted }]}>{ann.body}</Text>
-                            ) : null}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  );
-                })()}
+                  <Text style={[styles.detailStatus, { color: statusColor }]}>{statusText}</Text>
 
-                {sortedHours.length > 0 && (
-                  <View style={styles.detailHoursSection}>
-                    <Text style={[styles.detailHoursTitle, { color: cardMuted }]}>Hours</Text>
-                    {sortedHours.map((h, i) => (
-                      <View key={i} style={styles.detailHoursRow}>
-                        <Text style={[styles.detailHoursDay, { color: cardText }]}>
-                          {WEEKDAY_ABBREV[String(h.weekday).toLowerCase().trim()] ?? String(h.weekday).slice(0, 3)}
-                        </Text>
-                        <Text style={[styles.detailHoursTime, { color: cardMuted }]}>
-                          {formatTimeForDisplay(h.open_time)} – {formatTimeForDisplay(h.close_time)}
-                        </Text>
+                  {(() => {
+                    const pantryAnns = getAnnouncementsForPantry(p.pantry_id);
+                    if (!pantryAnns.length) return null;
+                    return (
+                      <View style={styles.detailAnnsSection}>
+                        {pantryAnns.map((ann) => {
+                          const color = getAnnColor(ann.category);
+                          return (
+                            <View key={ann.id} style={[styles.detailAnnItem, { borderLeftColor: color }]}>
+                              <Text style={[styles.detailAnnTitle, { color: cardText }]}>{ann.title}</Text>
+                              {ann.body ? (
+                                <Text style={[styles.detailAnnBody, { color: cardMuted }]}>{ann.body}</Text>
+                              ) : null}
+                            </View>
+                          );
+                        })}
                       </View>
-                    ))}
-                  </View>
-                )}
+                    );
+                  })()}
 
-                <Pressable style={styles.detailDirectionsBtn} onPress={() => { openDirections(p); closeDetail(); }}>
-                  <Text style={styles.detailDirectionsBtnText}>Get Directions</Text>
-                </Pressable>
+                  {inv && (
+                    <View style={styles.detailInvSection}>
+                      <Text style={[styles.detailSectionLabel, { color: cardMuted }]}>Available Items</Text>
+                      {availableItems.length > 0 ? (
+                        <View style={styles.detailInvChips}>
+                          {availableItems.map((c) => (
+                            <View key={c.key} style={styles.detailInvChip}>
+                              <Text style={styles.detailInvChipText}>{c.label}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        <Text style={[styles.detailInvEmpty, { color: cardMuted }]}>
+                          No items currently available
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  {sortedHours.length > 0 && (
+                    <View style={styles.detailHoursSection}>
+                      <Text style={[styles.detailHoursTitle, { color: cardMuted }]}>Hours</Text>
+                      {sortedHours.map((h, i) => (
+                        <View key={i} style={styles.detailHoursRow}>
+                          <Text style={[styles.detailHoursDay, { color: cardText }]}>
+                            {WEEKDAY_ABBREV[String(h.weekday).toLowerCase().trim()] ?? String(h.weekday).slice(0, 3)}
+                          </Text>
+                          <Text style={[styles.detailHoursTime, { color: cardMuted }]}>
+                            {formatTimeForDisplay(h.open_time)} – {formatTimeForDisplay(h.close_time)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <Pressable style={styles.detailDirectionsBtn} onPress={() => { openDirections(p); closeDetail(); }}>
+                    <Text style={styles.detailDirectionsBtnText}>Get Directions</Text>
+                  </Pressable>
+                </ScrollView>
               </Animated.View>
             );
           })()}
@@ -1236,6 +1305,38 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "transparent",
   },
+  filterPickerRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 4,
+  },
+  filterPickerSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  filterPickerDivider: {
+    height: StyleSheet.hairlineWidth,
+    opacity: 0.3,
+    marginVertical: 10,
+  },
+  filterPickerClear: {
+    marginTop: 10,
+    alignSelf: "flex-end",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: "#FEF2F2",
+    borderRadius: 8,
+  },
+  filterPickerClearText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#EF4444",
+  },
   calloutAnnBody: {
     fontSize: 12,
     marginTop: 4,
@@ -1514,5 +1615,39 @@ const styles = StyleSheet.create({
   detailAnnBody: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  detailScrollContent: {
+    gap: 8,
+    paddingBottom: 36,
+  },
+  detailInvSection: {
+    marginTop: 4,
+    gap: 8,
+  },
+  detailSectionLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  detailInvChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  detailInvChip: {
+    backgroundColor: "#EFF6FF",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  detailInvChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+  detailInvEmpty: {
+    fontSize: 13,
+    fontStyle: "italic",
   },
 });
