@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import * as ExpoCrypto from 'expo-crypto';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/lib/supabase';
-import type { PantryLocation, Announcement, AnnouncementCategory } from '@/types/pantry';
+import type { PantryLocation, Announcement, AnnouncementCategory, PantryInventory } from '@/types/pantry';
 
 async function geocodeAddress(street: string, city: string, state: string, zip: string): Promise<{ lat: number; lng: number } | null> {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -100,6 +100,21 @@ type AnnouncementForm = {
   schedule_at: Date | null;
 };
 
+const INVENTORY_CATEGORIES: { key: keyof Omit<PantryInventory, 'pantry_id' | 'name' | 'last_updated'>; label: string }[] = [
+  { key: 'canned_food', label: 'Canned Food' },
+  { key: 'dry_grains', label: 'Dry Grains' },
+  { key: 'cereal', label: 'Cereal' },
+  { key: 'dairy', label: 'Dairy' },
+  { key: 'eggs', label: 'Eggs' },
+  { key: 'fresh_produce', label: 'Fresh Produce' },
+  { key: 'fresh_protein', label: 'Fresh Protein' },
+  { key: 'frozen_food', label: 'Frozen Food' },
+  { key: 'bread', label: 'Bread' },
+  { key: 'beverages', label: 'Beverages' },
+  { key: 'baby_items', label: 'Baby Items' },
+  { key: 'snacks', label: 'Snacks' },
+];
+
 const EMPTY_ANN_FORM: AnnouncementForm = {
   title: '', body: '', category: 'general', pantry_id: null,
   expires_at: null, status: 'publish_now', schedule_at: null,
@@ -145,7 +160,7 @@ export default function AdminScreen() {
   const inputBg = useThemeColor({ light: '#FFFFFF', dark: '#111827' }, 'background');
   const separatorColor = useThemeColor({ light: '#F3F4F6', dark: '#1F2937' }, 'background');
 
-  const [activeTab, setActiveTab] = useState<'pantries' | 'announcements'>('pantries');
+  const [activeTab, setActiveTab] = useState<'pantries' | 'announcements' | 'inventory'>('pantries');
 
   const [pantries, setPantries] = useState<PantryLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,6 +188,21 @@ export default function AdminScreen() {
   const [schedulePickerMode, setSchedulePickerMode] = useState<'date' | 'time'>('date');
   const [showPantryPicker, setShowPantryPicker] = useState(false);
   const [pantryPickerSearch, setPantryPickerSearch] = useState('');
+
+  const [inventories, setInventories] = useState<PantryInventory[]>([]);
+  const [invLoading, setInvLoading] = useState(true);
+  const [invSearchQuery, setInvSearchQuery] = useState('');
+  const [showInvForm, setShowInvForm] = useState(false);
+  const [invEditTarget, setInvEditTarget] = useState<PantryInventory | null>(null);
+  const [invForm, setInvForm] = useState<Omit<PantryInventory, 'pantry_id' | 'name' | 'last_updated'>>({
+    canned_food: false, dry_grains: false, cereal: false, dairy: false,
+    eggs: false, fresh_produce: false, fresh_protein: false, frozen_food: false,
+    bread: false, beverages: false, baby_items: false, snacks: false,
+  });
+  const [invSaving, setInvSaving] = useState(false);
+  const [invSelectedPantryId, setInvSelectedPantryId] = useState<string | null>(null);
+  const [showInvPantryPicker, setShowInvPantryPicker] = useState(false);
+  const [invPantryPickerSearch, setInvPantryPickerSearch] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -221,6 +251,18 @@ export default function AdminScreen() {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from('pantry_inventory')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) console.error('Inventory fetch error:', error.message);
+      setInventories(data ?? []);
+      setInvLoading(false);
+    })();
+  }, []);
+
   const filteredAnnouncements = useMemo(() => {
     const q = annSearchQuery.trim().toLowerCase();
     if (!q) return announcements;
@@ -228,6 +270,12 @@ export default function AdminScreen() {
       [a.title, a.body, a.category].join(' ').toLowerCase().includes(q)
     );
   }, [announcements, annSearchQuery]);
+
+  const filteredInventories = useMemo(() => {
+    const q = invSearchQuery.trim().toLowerCase();
+    if (!q) return inventories;
+    return inventories.filter((i) => i.name.toLowerCase().includes(q));
+  }, [inventories, invSearchQuery]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -433,6 +481,63 @@ export default function AdminScreen() {
     return ANNOUNCEMENT_CATEGORIES.find((c) => c.value === cat) ?? ANNOUNCEMENT_CATEGORIES[3];
   }
 
+  function openAddInv() {
+    setInvEditTarget(null);
+    setInvSelectedPantryId(null);
+    setInvForm({
+      canned_food: false, dry_grains: false, cereal: false, dairy: false,
+      eggs: false, fresh_produce: false, fresh_protein: false, frozen_food: false,
+      bread: false, beverages: false, baby_items: false, snacks: false,
+    });
+    setShowInvForm(true);
+  }
+
+  function openEditInv(inv: PantryInventory) {
+    setInvEditTarget(inv);
+    setInvSelectedPantryId(inv.pantry_id);
+    setInvForm({
+      canned_food: inv.canned_food, dry_grains: inv.dry_grains, cereal: inv.cereal,
+      dairy: inv.dairy, eggs: inv.eggs, fresh_produce: inv.fresh_produce,
+      fresh_protein: inv.fresh_protein, frozen_food: inv.frozen_food, bread: inv.bread,
+      beverages: inv.beverages, baby_items: inv.baby_items, snacks: inv.snacks,
+    });
+    setShowInvForm(true);
+  }
+
+  function closeInvForm() {
+    setShowInvForm(false);
+    setInvEditTarget(null);
+  }
+
+  async function handleInvSave() {
+    const pantryId = invEditTarget?.pantry_id ?? invSelectedPantryId;
+    if (!pantryId) { Alert.alert('Missing field', 'Please select a pantry.'); return; }
+    setInvSaving(true);
+    try {
+      const pantry = pantries.find((p) => p.pantry_id === pantryId);
+      const payload = {
+        pantry_id: pantryId,
+        name: pantry?.name ?? '',
+        last_updated: new Date().toISOString(),
+        ...invForm,
+      };
+      const { data, error } = await supabase
+        .from('pantry_inventory')
+        .upsert(payload, { onConflict: 'pantry_id' })
+        .select()
+        .single();
+      if (error) { Alert.alert('Error', error.message); return; }
+      setInventories((prev) => {
+        const idx = prev.findIndex((i) => i.pantry_id === data.pantry_id);
+        if (idx >= 0) return prev.map((i, j) => j === idx ? data : i);
+        return [...prev, data];
+      });
+      closeInvForm();
+    } finally {
+      setInvSaving(false);
+    }
+  }
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]} edges={['top']}>
       {/* Header */}
@@ -463,6 +568,13 @@ export default function AdminScreen() {
           onPress={() => setActiveTab('announcements')}>
           <Text style={[styles.tabText, { color: mutedColor }, activeTab === 'announcements' && styles.tabTextActive]}>
             Announcements
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tab, activeTab === 'inventory' && styles.tabActive]}
+          onPress={() => setActiveTab('inventory')}>
+          <Text style={[styles.tabText, { color: mutedColor }, activeTab === 'inventory' && styles.tabTextActive]}>
+            Inventory
           </Text>
         </Pressable>
       </View>
@@ -523,7 +635,7 @@ export default function AdminScreen() {
             />
           )}
         </>
-      ) : (
+      ) : activeTab === 'announcements' ? (
         <>
           {/* Announcements Search + Add */}
           <View style={[styles.toolbar, { borderBottomColor: borderColor }]}>
@@ -609,6 +721,67 @@ export default function AdminScreen() {
                         <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
                       </Pressable>
                     </View>
+                  </View>
+                );
+              }}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {/* Inventory Tab */}
+          <View style={[styles.toolbar, { borderBottomColor: borderColor }]}>
+            <TextInput
+              style={[styles.searchInput, { backgroundColor: inputBg, borderColor, color: textColor }]}
+              placeholder="Search inventory…"
+              placeholderTextColor={mutedColor}
+              value={invSearchQuery}
+              onChangeText={setInvSearchQuery}
+              returnKeyType="search"
+            />
+            <Pressable
+              style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
+              onPress={openAddInv}>
+              <Text style={styles.addBtnText}>+ Add</Text>
+            </Pressable>
+          </View>
+
+          {invLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" />
+            </View>
+          ) : (
+            <FlatList
+              data={filteredInventories}
+              keyExtractor={(i) => i.pantry_id}
+              contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
+              ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: separatorColor }]} />}
+              ListEmptyComponent={
+                <Text style={[styles.emptyText, { color: mutedColor }]}>No inventory records yet</Text>
+              }
+              renderItem={({ item }) => {
+                const count = INVENTORY_CATEGORIES.filter((c) => item[c.key]).length;
+                const lastUpdated = item.last_updated
+                  ? new Date(item.last_updated).toLocaleDateString()
+                  : 'Never';
+                return (
+                  <View style={styles.row}>
+                    <View style={styles.rowInfo}>
+                      <Text style={[styles.rowName, { color: textColor }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      <Text style={[styles.rowAddress, { color: mutedColor }]}>
+                        {count} of {INVENTORY_CATEGORIES.length} items available
+                      </Text>
+                      <Text style={[styles.rowAddress, { color: mutedColor }]}>
+                        Updated {lastUpdated}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={({ pressed }) => [styles.editBtn, { borderColor }, pressed && { opacity: 0.7 }]}
+                      onPress={() => openEditInv(item)}>
+                      <Text style={[styles.editBtnText, { color: textColor }]}>Edit</Text>
+                    </Pressable>
                   </View>
                 );
               }}
@@ -1238,6 +1411,142 @@ export default function AdminScreen() {
               </Pressable>
             </Pressable>
           )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Inventory Edit / Add Modal */}
+      <Modal
+        visible={showInvForm}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeInvForm}>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]} edges={['top']}>
+          <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
+            <Pressable onPress={closeInvForm}>
+              <Text style={[styles.modalCancel, { color: mutedColor }]}>Cancel</Text>
+            </Pressable>
+            <Text style={[styles.modalTitle, { color: textColor }]}>
+              {invEditTarget ? 'Edit Inventory' : 'New Inventory Record'}
+            </Text>
+            <Pressable onPress={handleInvSave} disabled={invSaving}>
+              <Text style={[styles.modalSave, invSaving && { opacity: 0.4 }]}>
+                {invSaving ? 'Saving…' : 'Save'}
+              </Text>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={[styles.formContent, { paddingBottom: insets.bottom + 32 }]}>
+
+            <Text style={[styles.sectionLabel, { color: mutedColor }]}>PANTRY</Text>
+            <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+              {invEditTarget ? (
+                <View style={styles.fieldRow}>
+                  <Text style={[styles.fieldLabel, { color: mutedColor }]}>Pantry</Text>
+                  <Text style={[styles.fieldInput, { color: textColor }]}>{invEditTarget.name}</Text>
+                </View>
+              ) : (
+                <Pressable
+                  style={styles.fieldRow}
+                  onPress={() => { setInvPantryPickerSearch(''); setShowInvPantryPicker(true); }}>
+                  <Text style={[styles.fieldLabel, { color: mutedColor }]}>Pantry</Text>
+                  <Text
+                    style={[styles.fieldInput, { color: invSelectedPantryId ? textColor : mutedColor }]}
+                    numberOfLines={1}>
+                    {invSelectedPantryId
+                      ? (pantries.find((p) => p.pantry_id === invSelectedPantryId)?.name ?? 'Unknown')
+                      : 'Select pantry…'}
+                  </Text>
+                  <Text style={[styles.pickerChevron, { color: mutedColor }]}>›</Text>
+                </Pressable>
+              )}
+            </View>
+
+            <Text style={[styles.sectionLabel, { color: mutedColor }]}>AVAILABLE ITEMS</Text>
+            <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+              {INVENTORY_CATEGORIES.map((cat, i) => (
+                <View key={cat.key}>
+                  {i > 0 && <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />}
+                  <View style={styles.switchRow}>
+                    <Text style={[styles.switchLabel, { color: textColor }]}>{cat.label}</Text>
+                    <Switch
+                      value={invForm[cat.key]}
+                      onValueChange={(v) => setInvForm((f) => ({ ...f, [cat.key]: v }))}
+                      trackColor={{ false: '#D1D5DB', true: '#2563EB' }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+
+          {/* Inventory Pantry Picker — nested so it presents from within the pageSheet */}
+          <Modal
+            visible={showInvPantryPicker}
+            animationType="slide"
+            presentationStyle="pageSheet"
+            onRequestClose={() => setShowInvPantryPicker(false)}>
+            <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]} edges={['top']}>
+              <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
+                <Pressable onPress={() => setShowInvPantryPicker(false)}>
+                  <Text style={[styles.modalCancel, { color: mutedColor }]}>Cancel</Text>
+                </Pressable>
+                <Text style={[styles.modalTitle, { color: textColor }]}>Select Pantry</Text>
+                <View style={{ minWidth: 70 }} />
+              </View>
+
+              <View style={[styles.pantryPickerSearch, { backgroundColor: cardBg, borderColor }]}>
+                <TextInput
+                  style={[styles.pantryPickerSearchInput, { color: textColor }]}
+                  placeholder="Search pantries…"
+                  placeholderTextColor={mutedColor}
+                  value={invPantryPickerSearch}
+                  onChangeText={setInvPantryPickerSearch}
+                  autoCapitalize="none"
+                  clearButtonMode="while-editing"
+                />
+              </View>
+
+              <FlatList
+                data={pantries
+                  .filter((p) => {
+                    const hasRecord = inventories.some((i) => i.pantry_id === p.pantry_id);
+                    if (hasRecord) return false;
+                    if (!invPantryPickerSearch.trim()) return true;
+                    return p.name.toLowerCase().includes(invPantryPickerSearch.toLowerCase());
+                  })
+                  .sort((a, b) => a.name.localeCompare(b.name))}
+                keyExtractor={(p) => p.pantry_id}
+                ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: borderColor }]} />}
+                ListEmptyComponent={
+                  <Text style={[styles.emptyText, { color: mutedColor }]}>
+                    All pantries already have inventory records
+                  </Text>
+                }
+                renderItem={({ item }) => {
+                  const isSelected = invSelectedPantryId === item.pantry_id;
+                  return (
+                    <Pressable
+                      style={({ pressed }) => [styles.pantryPickerRow, pressed && { opacity: 0.6 }]}
+                      onPress={() => {
+                        setInvSelectedPantryId(item.pantry_id);
+                        setShowInvPantryPicker(false);
+                      }}>
+                      <View style={styles.pantryPickerRowContent}>
+                        <Text style={[styles.pantryPickerRowName, { color: textColor }]}>{item.name}</Text>
+                        <Text style={[styles.pantryPickerRowSub, { color: mutedColor }]}>
+                          {item.street}, {item.city}
+                        </Text>
+                      </View>
+                      {isSelected && <Text style={styles.pantryPickerCheck}>✓</Text>}
+                    </Pressable>
+                  );
+                }}
+              />
+            </SafeAreaView>
+          </Modal>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
