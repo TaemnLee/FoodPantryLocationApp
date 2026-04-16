@@ -23,6 +23,24 @@ export type PantryLocation = {
   pantry_op_hours?: PantryOpHours[];
 };
 
+export type PantryInventory = {
+  pantry_id: string;
+  name: string;
+  last_updated: string | null;
+  canned_food: boolean;
+  dry_grains: boolean;
+  cereal: boolean;
+  dairy: boolean;
+  eggs: boolean;
+  fresh_produce: boolean;
+  fresh_protein: boolean;
+  frozen_food: boolean;
+  bread: boolean;
+  beverages: boolean;
+  baby_items: boolean;
+  snacks: boolean;
+};
+
 export type AnnouncementCategory = 'urgent' | 'event' | 'hours_change' | 'general';
 
 /** Row from Supabase announcements table */
