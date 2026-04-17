@@ -236,9 +236,12 @@ const styles = StyleSheet.create({
   ctaArrow: { fontSize: 20, fontWeight: '300' },
   adminLink: {
     alignSelf: 'center',
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 16,
     marginTop: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(107,114,128,0.4)',
   },
   adminLinkText: {
     fontSize: 12,

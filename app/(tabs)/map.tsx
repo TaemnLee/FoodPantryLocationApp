@@ -69,9 +69,59 @@ function formatTimeForDisplay(t: string): string {
   return `${hour - 12}:${mm} PM`;
 }
 
+const SEASON_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function todayYMD(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isInSeason(pantry: PantryLocation): boolean {
+  if (pantry.year_round !== false) return true;
+  const { operating_date_start, operating_date_end, recurring_annual } = pantry;
+  if (!operating_date_start && !operating_date_end) return true;
+
+  if (recurring_annual) {
+    // Ignore the year — compare only MM-DD so the season repeats automatically every year
+    const todayMD = todayYMD().slice(5); // "MM-DD"
+    const startMD = operating_date_start?.slice(5) ?? null;
+    const endMD = operating_date_end?.slice(5) ?? null;
+    if (startMD && endMD) {
+      // Normal range (e.g. 04-01 to 10-31) vs cross-year (e.g. 11-01 to 02-28)
+      return startMD <= endMD
+        ? todayMD >= startMD && todayMD <= endMD
+        : todayMD >= startMD || todayMD <= endMD;
+    }
+    if (startMD) return todayMD >= startMD;
+    if (endMD) return todayMD <= endMD;
+    return true;
+  }
+
+  // One-time specific dates — compare full YYYY-MM-DD
+  const today = todayYMD();
+  if (operating_date_start && today < operating_date_start) return false;
+  if (operating_date_end && today > operating_date_end) return false;
+  return true;
+}
+
+function formatSeasonStart(pantry: PantryLocation): string | null {
+  const { operating_date_start } = pantry;
+  if (!operating_date_start) return null;
+  const parts = operating_date_start.split("-");
+  const m = parseInt(parts[1] ?? "1", 10);
+  const d = parseInt(parts[2] ?? "1", 10);
+  // For recurring, omit the year since it repeats every year
+  const yearSuffix = pantry.recurring_annual ? "" : `, ${parts[0]}`;
+  return `Opens ${SEASON_MONTHS[m - 1]} ${d}${yearSuffix}`;
+}
+
 function getOpenStatus(
   pantry: PantryLocation
 ): { isOpen: boolean; closingTime: string | null; nextOpens: string | null } {
+  if (!isInSeason(pantry)) {
+    return { isOpen: false, closingTime: null, nextOpens: formatSeasonStart(pantry) };
+  }
+
   const now = new Date();
   const todayIndex = now.getDay();
   const nowMins = now.getHours() * 60 + now.getMinutes();
@@ -125,10 +175,12 @@ function getOpenStatus(
 }
 
 function isOpenNow(pantry: PantryLocation): boolean {
+  if (!isInSeason(pantry)) return false;
   return getOpenStatus(pantry).isOpen;
 }
 
 function opensLaterToday(pantry: PantryLocation): boolean {
+  if (!isInSeason(pantry)) return false;
   const todaySessions = getHoursForDay(pantry, new Date().getDay());
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
   return todaySessions.some((s) => timeToMinutes(s.open_time) > nowMins);
@@ -246,10 +298,11 @@ export default function MapScreen() {
   const searchResults = useMemo(() => {
     let filtered = pantries.filter((p) => matchesSearch(p, searchQuery));
     if (filterOpenNow) filtered = filtered.filter(isOpenNow);
-    if (filterDay !== null) filtered = filtered.filter((p) => getHoursForDay(p, filterDay).length > 0);
+    if (filterDay !== null) filtered = filtered.filter((p) => isInSeason(p) && getHoursForDay(p, filterDay).length > 0);
     if (filterTime !== null) {
       const timeMins = timeToMinutes(filterTime);
       filtered = filtered.filter((p) => {
+        if (!isInSeason(p)) return false;
         const hours = filterDay !== null ? getHoursForDay(p, filterDay) : (p.pantry_op_hours ?? []);
         return hours.some((h) => timeToMinutes(h.open_time) <= timeMins && timeMins < timeToMinutes(h.close_time));
       });
@@ -278,10 +331,11 @@ export default function MapScreen() {
   const visiblePantries = useMemo(() => {
     let filtered = [...pantries];
     if (filterOpenNow) filtered = filtered.filter(isOpenNow);
-    if (filterDay !== null) filtered = filtered.filter((p) => getHoursForDay(p, filterDay).length > 0);
+    if (filterDay !== null) filtered = filtered.filter((p) => isInSeason(p) && getHoursForDay(p, filterDay).length > 0);
     if (filterTime !== null) {
       const timeMins = timeToMinutes(filterTime);
       filtered = filtered.filter((p) => {
+        if (!isInSeason(p)) return false;
         const hours = filterDay !== null ? getHoursForDay(p, filterDay) : (p.pantry_op_hours ?? []);
         return hours.some((h) => timeToMinutes(h.open_time) <= timeMins && timeMins < timeToMinutes(h.close_time));
       });
@@ -308,21 +362,30 @@ export default function MapScreen() {
       distanceMiles(userCoords!.latitude, userCoords!.longitude, p.latitude, p.longitude);
     const byDist = (a: PantryLocation, b: PantryLocation) => dist(a) - dist(b);
 
-    const activePantries = pantries.filter((p) => !p.temporary_closure);
-    const openNow = activePantries.filter(isOpenNow).sort(byDist);
+    const nonClosed = pantries.filter((p) => !p.temporary_closure);
+    const inSeasonPantries = nonClosed.filter(isInSeason);
+
+    const openNow = inSeasonPantries.filter(isOpenNow).sort(byDist);
     if (openNow.length) {
       const p = openNow[0];
       return { pantry: p, miles: dist(p), label: "Nearest open now" as const };
     }
 
-    const openToday = activePantries.filter(opensLaterToday).sort(byDist);
+    const openToday = inSeasonPantries.filter(opensLaterToday).sort(byDist);
     if (openToday.length) {
       const p = openToday[0];
       return { pantry: p, miles: dist(p), label: "Nearest open today" as const };
     }
 
-    if (!activePantries.length) return null;
-    const closest = activePantries.reduce((a, b) => (dist(a) < dist(b) ? a : b));
+    // Nearest in-season pantry (closed for today but in operating season)
+    if (inSeasonPantries.length) {
+      const closest = inSeasonPantries.reduce((a, b) => (dist(a) < dist(b) ? a : b));
+      return { pantry: closest, miles: dist(closest), label: "Nearest pantry" as const };
+    }
+
+    // Fallback: nearest non-temp-closed pantry even if out of season
+    if (!nonClosed.length) return null;
+    const closest = nonClosed.reduce((a, b) => (dist(a) < dist(b) ? a : b));
     return { pantry: closest, miles: dist(closest), label: "Nearest pantry" as const };
   }, [userCoords, pantries]);
 
@@ -399,7 +462,7 @@ async function fetchPantries() {
       await Promise.all([
         supabase.from("pantry_location").select("*"),
         supabase.from("pantry_op_hours").select("*"),
-        supabase.from("pantry_main").select("pantry_id, temporary_closure"),
+        supabase.from("pantry_main").select("pantry_id, temporary_closure, year_round, recurring_annual, operating_date_start, operating_date_end"),
       ]);
 
     if (locError) {
@@ -412,13 +475,17 @@ async function fetchPantries() {
     }
 
     const allHours = hours ?? [];
-    const closureMap = Object.fromEntries(
-      (mains ?? []).map((m) => [String(m.pantry_id), m.temporary_closure ?? false])
+    const mainMap = Object.fromEntries(
+      (mains ?? []).map((m) => [String(m.pantry_id), m])
     );
 
     const pantriesWithHours = (locations ?? []).map((p) => ({
       ...p,
-      temporary_closure: closureMap[String(p.pantry_id)] ?? false,
+      temporary_closure: mainMap[String(p.pantry_id)]?.temporary_closure ?? false,
+      year_round: mainMap[String(p.pantry_id)]?.year_round ?? true,
+      recurring_annual: mainMap[String(p.pantry_id)]?.recurring_annual ?? false,
+      operating_date_start: mainMap[String(p.pantry_id)]?.operating_date_start ?? null,
+      operating_date_end: mainMap[String(p.pantry_id)]?.operating_date_end ?? null,
       pantry_op_hours: allHours.filter(
         (h) => String(h.pantry_id) === String(p.pantry_id)
       ),
@@ -535,9 +602,7 @@ useEffect(() => {
       },
       500
     );
-    setTimeout(() => {
-      markerRefs.current[pantry.pantry_id]?.showCallout?.();
-    }, 550);
+    openDetail(pantry);
   }
 
   function openDirections(pantry: PantryLocation) {
@@ -569,8 +634,9 @@ useEffect(() => {
         mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
         {visiblePantries.map((pantry) => {
           const isTempClosed = pantry.temporary_closure === true;
+          const outOfSeason = !isInSeason(pantry);
           const pantryAnn = hasActiveAnnouncement(pantry.pantry_id);
-          const pinColor = isTempClosed ? "#9CA3AF" : pantryAnn ? getAnnPinColor(pantryAnn.category) : undefined;
+          const pinColor = isTempClosed ? "#9CA3AF" : outOfSeason ? "#D97706" : pantryAnn ? getAnnPinColor(pantryAnn.category) : undefined;
           return (
             <Marker
               key={pantry.pantry_id}
@@ -902,14 +968,18 @@ useEffect(() => {
 
       {!showSearchDropdown && displayPantry && (() => {
         const isTempClosed = displayPantry.temporary_closure === true;
+        const outOfSeason = !isInSeason(displayPantry);
         const displayAnn = hasActiveAnnouncement(displayPantry.pantry_id);
         const { isOpen, closingTime, nextOpens } = getOpenStatus(displayPantry);
         const statusText = isTempClosed
           ? "Temporarily Closed"
-          : displayAnn
-            ? displayAnn.title
-            : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+          : outOfSeason
+            ? "Out of Season"
+            : displayAnn
+              ? displayAnn.title
+              : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
         const statusColor = isTempClosed ? "#F59E0B"
+          : outOfSeason ? "#D97706"
           : displayAnn ? getAnnColor(displayAnn.category)
           : isOpen ? "#16a34a" : "#dc2626";
         return (
@@ -956,11 +1026,14 @@ useEffect(() => {
           {detailPantry && (() => {
             const p = detailPantry;
             const isTempClosed = p.temporary_closure === true;
+            const outOfSeason = !isInSeason(p);
             const { isOpen, closingTime, nextOpens } = getOpenStatus(p);
             const statusText = isTempClosed
               ? "Temporarily Closed"
-              : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
-            const statusColor = isTempClosed ? "#F59E0B" : isOpen ? "#16a34a" : "#dc2626";
+              : outOfSeason
+                ? "Out of Season"
+                : isOpen ? closingTime ? `Open until ${closingTime}` : "Open" : nextOpens ?? "Closed";
+            const statusColor = isTempClosed ? "#F59E0B" : outOfSeason ? "#D97706" : isOpen ? "#16a34a" : "#dc2626";
             const sortedHours = [...(p.pantry_op_hours ?? [])].sort((a, b) => {
               const ai = WEEKDAYS.indexOf(String(a.weekday).toLowerCase().trim());
               const bi = WEEKDAYS.indexOf(String(b.weekday).toLowerCase().trim());
@@ -996,6 +1069,23 @@ useEffect(() => {
                   </Text>
 
                   <Text style={[styles.detailStatus, { color: statusColor }]}>{statusText}</Text>
+
+                  {!p.year_round && (p.operating_date_start || p.operating_date_end) && (() => {
+                    const fmt = (ymd: string) => {
+                      const parts = ymd.split('-');
+                      const m = parseInt(parts[1] ?? '1', 10);
+                      const d = parseInt(parts[2] ?? '1', 10);
+                      const year = !p.recurring_annual ? `, ${parts[0]}` : '';
+                      return `${SEASON_MONTHS[m - 1]} ${d}${year}`;
+                    };
+                    const start = p.operating_date_start ? fmt(p.operating_date_start) : null;
+                    const end = p.operating_date_end ? fmt(p.operating_date_end) : null;
+                    const recur = p.recurring_annual ? ' (annual)' : '';
+                    const label = start && end ? `Season: ${start} – ${end}${recur}` : start ? `Opens ${start}${recur}` : `Closes ${end}${recur}`;
+                    return (
+                      <Text style={[styles.detailAddress, { color: cardMuted, marginTop: 2 }]}>{label}</Text>
+                    );
+                  })()}
 
                   {(() => {
                     const pantryAnns = getAnnouncementsForPantry(p.pantry_id);
@@ -1556,7 +1646,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    paddingBottom: 36,
+    paddingBottom: 0,
     gap: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -4 },
@@ -1666,7 +1756,7 @@ const styles = StyleSheet.create({
   },
   detailScrollContent: {
     gap: 8,
-    paddingBottom: 36,
+    paddingBottom: 24,
   },
   detailInvSection: {
     marginTop: 4,
