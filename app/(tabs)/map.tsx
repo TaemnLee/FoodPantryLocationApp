@@ -636,7 +636,7 @@ useEffect(() => {
           const isTempClosed = pantry.temporary_closure === true;
           const outOfSeason = !isInSeason(pantry);
           const pantryAnn = hasActiveAnnouncement(pantry.pantry_id);
-          const pinColor = isTempClosed ? "#9CA3AF" : outOfSeason ? "#D97706" : pantryAnn ? getAnnPinColor(pantryAnn.category) : undefined;
+          const pinColor = isTempClosed ? "#9CA3AF" : outOfSeason ? "#D97706" : pantryAnn ? getAnnPinColor(pantryAnn.category) : "#2563EB";
           return (
             <Marker
               key={pantry.pantry_id}
