@@ -20,6 +20,10 @@ export type PantryLocation = {
   longitude: number;
   service_type?: string;
   temporary_closure?: boolean;
+  year_round?: boolean;
+  recurring_annual?: boolean;
+  operating_date_start?: string | null;
+  operating_date_end?: string | null;
   pantry_op_hours?: PantryOpHours[];
 };
 
