@@ -1109,7 +1109,14 @@ useEffect(() => {
 
                   {inv && (
                     <View style={styles.detailInvSection}>
-                      <Text style={[styles.detailSectionLabel, { color: cardMuted }]}>Available Items</Text>
+                      <View style={styles.detailInvHeader}>
+                        <Text style={[styles.detailSectionLabel, { color: cardMuted }]}>Available Items</Text>
+                        {inv.last_updated && (
+                          <Text style={[styles.detailInvUpdated, { color: cardMuted }]}>
+                            Updated {new Date(inv.last_updated).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </Text>
+                        )}
+                      </View>
                       {availableItems.length > 0 ? (
                         <View style={styles.detailInvChips}>
                           {availableItems.map((c) => (
@@ -1783,6 +1790,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#2563EB",
+  },
+  detailInvHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  detailInvUpdated: {
+    fontSize: 11,
+    fontStyle: "italic",
   },
   detailInvEmpty: {
     fontSize: 13,
