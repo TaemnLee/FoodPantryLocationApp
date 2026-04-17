@@ -74,11 +74,16 @@ type PantryForm = {
   service_type: string;
   isClosed: boolean;
   hours: FormHour[];
+  yearRound: boolean;
+  recurringAnnual: boolean;
+  operating_date_start: Date | null;
+  operating_date_end: Date | null;
 };
 
 const EMPTY_FORM: PantryForm = {
   name: '', street: '', city: '', state: 'OH', zip: '',
   service_type: '', isClosed: false, hours: [],
+  yearRound: true, recurringAnnual: false, operating_date_start: null, operating_date_end: null,
 };
 
 const ANNOUNCEMENT_CATEGORIES: { value: AnnouncementCategory; label: string; color: string }[] = [
@@ -120,6 +125,21 @@ const EMPTY_ANN_FORM: AnnouncementForm = {
   expires_at: null, status: 'publish_now', schedule_at: null,
 };
 
+function formatDateOnly(d: Date): string {
+  // Use explicit parts to avoid timezone shifting the date
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+function dateToYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function ymdToLocalDate(ymd: string): Date {
+  const parts = ymd.split('-').map(Number);
+  return new Date(parts[0]!, (parts[1]! - 1), parts[2]!);
+}
+
 function formatDateTime(d: Date): string {
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
   const day = d.getDate().toString().padStart(2, '0');
@@ -145,6 +165,10 @@ function pantryToForm(p: PantryLocation): PantryForm {
       open_time: h.open_time,
       close_time: h.close_time,
     })),
+    yearRound: p.year_round !== false,
+    recurringAnnual: p.recurring_annual ?? false,
+    operating_date_start: p.operating_date_start ? ymdToLocalDate(p.operating_date_start) : null,
+    operating_date_end: p.operating_date_end ? ymdToLocalDate(p.operating_date_end) : null,
   };
 }
 
@@ -173,6 +197,8 @@ export default function AdminScreen() {
   const formScrollRef = useRef<ScrollView>(null);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showOpStartPicker, setShowOpStartPicker] = useState(false);
+  const [showOpEndPicker, setShowOpEndPicker] = useState(false);
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [annLoading, setAnnLoading] = useState(true);
@@ -215,7 +241,7 @@ export default function AdminScreen() {
       const [{ data: locations, error: locError }, { data: hours, error: hoursError }, { data: mains }] = await Promise.all([
         supabase.from('pantry_location').select('*'),
         supabase.from('pantry_op_hours').select('*'),
-        supabase.from('pantry_main').select('pantry_id, service_type, temporary_closure'),
+        supabase.from('pantry_main').select('pantry_id, service_type, temporary_closure, year_round, recurring_annual, operating_date_start, operating_date_end'),
       ]);
       if (locError) {
         console.error('Admin fetch error:', locError.message, locError.code);
@@ -230,6 +256,10 @@ export default function AdminScreen() {
         ...p,
         service_type: mainMap[String(p.pantry_id)]?.service_type ?? '',
         temporary_closure: mainMap[String(p.pantry_id)]?.temporary_closure ?? false,
+        year_round: mainMap[String(p.pantry_id)]?.year_round ?? true,
+        recurring_annual: mainMap[String(p.pantry_id)]?.recurring_annual ?? false,
+        operating_date_start: mainMap[String(p.pantry_id)]?.operating_date_start ?? null,
+        operating_date_end: mainMap[String(p.pantry_id)]?.operating_date_end ?? null,
         pantry_op_hours: allHours.filter((h) => String(h.pantry_id) === String(p.pantry_id)),
       }));
       setPantries(merged);
@@ -329,6 +359,9 @@ export default function AdminScreen() {
 
   async function handleSave() {
     if (!form.name.trim()) { Alert.alert('Missing field', 'Name is required.'); return; }
+    if (!form.yearRound && (!form.operating_date_start || !form.operating_date_end)) {
+      Alert.alert('Operating Season', 'Set both a start and end date, or enable Year Round.'); return;
+    }
     setSaving(true);
     try {
       if (isAdding) {
@@ -337,6 +370,10 @@ export default function AdminScreen() {
         const pantry_id = ExpoCrypto.randomUUID();
         const { error: mainErr } = await supabase.from('pantry_main').insert({
           pantry_id, name: form.name, service_type: form.service_type, temporary_closure: form.isClosed,
+          year_round: form.yearRound,
+          recurring_annual: !form.yearRound && form.recurringAnnual,
+          operating_date_start: form.yearRound || !form.operating_date_start ? null : dateToYMD(form.operating_date_start),
+          operating_date_end: form.yearRound || !form.operating_date_end ? null : dateToYMD(form.operating_date_end),
         });
         if (mainErr) { Alert.alert('Error', mainErr.message); return; }
         const { error: insertErr } = await supabase.from('pantry_location').insert({
@@ -362,6 +399,10 @@ export default function AdminScreen() {
         const id = editTarget!.pantry_id;
         await supabase.from('pantry_main').update({
           name: form.name, service_type: form.service_type, temporary_closure: form.isClosed,
+          year_round: form.yearRound,
+          recurring_annual: !form.yearRound && form.recurringAnnual,
+          operating_date_start: form.yearRound || !form.operating_date_start ? null : dateToYMD(form.operating_date_start),
+          operating_date_end: form.yearRound || !form.operating_date_end ? null : dateToYMD(form.operating_date_end),
         }).eq('pantry_id', id);
         const { error: updateErr } = await supabase.from('pantry_location').update({
           name: form.name, street: form.street, city: form.city,
@@ -376,7 +417,7 @@ export default function AdminScreen() {
         }
         setPantries((prev) => prev.map((p) =>
           p.pantry_id === id
-            ? { ...p, name: form.name, street: form.street, city: form.city, state: form.state, zip: form.zip, temporary_closure: form.isClosed, pantry_op_hours: form.hours.map((h) => ({ ...h, pantry_id: id, name: form.name })) }
+            ? { ...p, name: form.name, street: form.street, city: form.city, state: form.state, zip: form.zip, temporary_closure: form.isClosed, year_round: form.yearRound, recurring_annual: !form.yearRound && form.recurringAnnual, operating_date_start: form.yearRound || !form.operating_date_start ? null : dateToYMD(form.operating_date_start), operating_date_end: form.yearRound || !form.operating_date_end ? null : dateToYMD(form.operating_date_end), pantry_op_hours: form.hours.map((h) => ({ ...h, pantry_id: id, name: form.name })) }
             : p
         ));
       }
@@ -1257,6 +1298,147 @@ export default function AdminScreen() {
                     thumbColor="#FFFFFF"
                   />
                 </View>
+              </View>
+
+              {/* Operating Season */}
+              <Text style={[styles.sectionLabel, { color: mutedColor }]}>OPERATING SEASON</Text>
+              <View style={[styles.fieldGroup, { backgroundColor: cardBg, borderColor }]}>
+                <View style={styles.switchRow}>
+                  <View>
+                    <Text style={[styles.switchLabel, { color: textColor }]}>Year Round</Text>
+                    <Text style={[styles.switchSub, { color: mutedColor }]}>
+                      Open all year with no seasonal dates
+                    </Text>
+                  </View>
+                  <Switch
+                    value={form.yearRound}
+                    onValueChange={(v) => {
+                      if (v) {
+                        setShowOpStartPicker(false);
+                        setShowOpEndPicker(false);
+                        setForm((f) => ({ ...f, yearRound: true, operating_date_start: null, operating_date_end: null }));
+                      } else {
+                        const year = new Date().getFullYear();
+                        setForm((f) => ({
+                          ...f,
+                          yearRound: false,
+                          operating_date_start: new Date(year, 0, 1),
+                          operating_date_end: new Date(year, 11, 31),
+                        }));
+                      }
+                    }}
+                    trackColor={{ false: '#D1D5DB', true: '#2563EB' }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+
+                {!form.yearRound && (
+                  <>
+                    <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
+                    {/* Repeats every year */}
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: textColor }]}>Repeats Every Year</Text>
+                        <Text style={[styles.switchSub, { color: mutedColor }]}>
+                          Season auto-renews at the same dates annually
+                        </Text>
+                      </View>
+                      <Switch
+                        value={form.recurringAnnual}
+                        onValueChange={(v) => setForm((f) => ({ ...f, recurringAnnual: v }))}
+                        trackColor={{ false: '#D1D5DB', true: '#2563EB' }}
+                        thumbColor="#FFFFFF"
+                      />
+                    </View>
+                    <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
+                    {/* Start date */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.switchLabel, { color: textColor }]}>Season Start</Text>
+                        {form.operating_date_start && (
+                          <Text style={[styles.switchSub, { color: mutedColor }]}>
+                            {formatDateOnly(form.operating_date_start)}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          style={styles.pickerBtn}
+                          onPress={() => {
+                            setShowOpEndPicker(false);
+                            if (!form.operating_date_start) {
+                              const year = new Date().getFullYear();
+                              setForm((f) => ({ ...f, operating_date_start: new Date(year, 0, 1) }));
+                            }
+                            setShowOpStartPicker((v) => !v);
+                          }}>
+                          <Text style={styles.pickerBtnText}>{form.operating_date_start ? 'Change' : 'Set'}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    {showOpStartPicker && (
+                      <View style={styles.datePickerContainer}>
+                        <DateTimePicker
+                          value={form.operating_date_start ?? new Date()}
+                          mode="date"
+                          display="spinner"
+                          onChange={(_e, d) => { if (d) setForm((f) => ({ ...f, operating_date_start: d })); }}
+                        />
+                        <View style={styles.datePickerActions}>
+                          <Pressable
+                            style={[styles.pickerBtn, { flex: 1, backgroundColor: '#2563EB' }]}
+                            onPress={() => setShowOpStartPicker(false)}>
+                            <Text style={[styles.pickerBtnText, { color: '#FFFFFF' }]}>Done</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
+
+                    <View style={[styles.fieldDivider, { backgroundColor: borderColor }]} />
+                    {/* End date */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.switchLabel, { color: textColor }]}>Season End</Text>
+                        {form.operating_date_end && (
+                          <Text style={[styles.switchSub, { color: mutedColor }]}>
+                            {formatDateOnly(form.operating_date_end)}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          style={styles.pickerBtn}
+                          onPress={() => {
+                            setShowOpStartPicker(false);
+                            if (!form.operating_date_end) {
+                              const year = new Date().getFullYear();
+                              setForm((f) => ({ ...f, operating_date_end: new Date(year, 11, 31) }));
+                            }
+                            setShowOpEndPicker((v) => !v);
+                          }}>
+                          <Text style={styles.pickerBtnText}>{form.operating_date_end ? 'Change' : 'Set'}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    {showOpEndPicker && (
+                      <View style={styles.datePickerContainer}>
+                        <DateTimePicker
+                          value={form.operating_date_end ?? new Date()}
+                          mode="date"
+                          display="spinner"
+                          onChange={(_e, d) => { if (d) setForm((f) => ({ ...f, operating_date_end: d })); }}
+                        />
+                        <View style={styles.datePickerActions}>
+                          <Pressable
+                            style={[styles.pickerBtn, { flex: 1, backgroundColor: '#2563EB' }]}
+                            onPress={() => setShowOpEndPicker(false)}>
+                            <Text style={[styles.pickerBtnText, { color: '#FFFFFF' }]}>Done</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
+                  </>
+                )}
               </View>
 
               {/* Hours */}
