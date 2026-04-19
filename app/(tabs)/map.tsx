@@ -354,6 +354,11 @@ export default function MapScreen() {
     return filtered;
   }, [pantries, userCoords, filterOpenNow, filterDay, filterTime, filterMaxMiles, filterFoodType, inventories]);
 
+  const visibleSet = useMemo(
+    () => new Set(visiblePantries.map((p) => p.pantry_id)),
+    [visiblePantries]
+  );
+
   const showSearchDropdown = searchFocused;
 
   const nearest = useMemo(() => {
@@ -632,7 +637,8 @@ useEffect(() => {
         showsUserLocation={!!userCoords}
         showsMyLocationButton={!!userCoords}
         mapPadding={{ bottom: displayPantry ? 120 : 30, top: 0, left: 0, right: 0 }}>
-        {visiblePantries.map((pantry) => {
+        {pantries.map((pantry) => {
+          const visible = visibleSet.has(pantry.pantry_id);
           const isTempClosed = pantry.temporary_closure === true;
           const outOfSeason = !isInSeason(pantry);
           const pantryAnn = hasActiveAnnouncement(pantry.pantry_id);
@@ -643,6 +649,8 @@ useEffect(() => {
               ref={(ref) => { markerRefs.current[pantry.pantry_id] = ref; }}
               coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
               pinColor={pinColor}
+              opacity={visible ? 1 : 0}
+              tappable={visible}
               onPress={() => openDetail(pantry)}
             />
           );
@@ -985,7 +993,13 @@ useEffect(() => {
         return (
           <Pressable
             style={[styles.bottomCard, { bottom: 8, backgroundColor: cardBg }]}
-            onPress={() => openDetail(displayPantry)}>
+            onPress={() => {
+              mapRef.current?.animateToRegion(
+                { latitude: displayPantry.latitude, longitude: displayPantry.longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 },
+                500
+              );
+              openDetail(displayPantry);
+            }}>
             <View style={styles.cardBody}>
               <Text style={[styles.cardLabel, { color: cardMuted }]}>{displayLabel}</Text>
               <View style={styles.cardNameRow}>
