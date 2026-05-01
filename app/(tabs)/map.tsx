@@ -207,6 +207,20 @@ const INV_LABELS: { key: keyof Omit<PantryInventory, 'pantry_id' | 'name' | 'las
   { key: 'snacks', label: 'Snacks' },
 ];
 
+function PinMarker({ color }: { color: string }) {
+  return (
+    <View style={{ alignItems: "center" }}>
+      <View style={{
+        width: 22, height: 22, borderRadius: 11,
+        backgroundColor: color, borderWidth: 2.5, borderColor: "#fff",
+        shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.3, shadowRadius: 2, elevation: 3,
+      }} />
+      <View style={{ width: 2.5, height: 7, backgroundColor: color, marginTop: -1 }} />
+    </View>
+  );
+}
+
 const LICKING_COUNTY_REGION: Region = {
   latitude: 40.08,
   longitude: -82.48,
@@ -648,11 +662,12 @@ useEffect(() => {
               key={pantry.pantry_id}
               ref={(ref) => { markerRefs.current[pantry.pantry_id] = ref; }}
               coordinate={{ latitude: pantry.latitude, longitude: pantry.longitude }}
-              pinColor={pinColor}
-              opacity={visible ? 1 : 0}
               tappable={visible}
               onPress={() => openDetail(pantry)}
-            />
+              tracksViewChanges
+            >
+              {visible ? <PinMarker color={pinColor} /> : <View style={{ width: 1, height: 1, opacity: 0 }} />}
+            </Marker>
           );
         })}
       </MapView>
