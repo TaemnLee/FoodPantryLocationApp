@@ -234,7 +234,7 @@ export default function AdminScreen() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) router.replace('/');
     });
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     (async () => {
@@ -1110,7 +1110,7 @@ export default function AdminScreen() {
               <Pressable style={[styles.confirmCard, { backgroundColor: bg, borderColor }]} onPress={() => {}}>
                 <Text style={[styles.confirmTitle, { color: textColor }]}>Delete Announcement?</Text>
                 <Text style={[styles.confirmBody, { color: mutedColor }]}>
-                  "{annEditTarget?.title}" will be permanently removed.
+                  {`"${annEditTarget?.title ?? ''}" will be permanently removed.`}
                 </Text>
                 <View style={[styles.confirmDivider, { backgroundColor: borderColor }]} />
                 <Pressable

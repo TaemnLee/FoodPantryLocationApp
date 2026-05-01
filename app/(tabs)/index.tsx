@@ -1,8 +1,20 @@
 import { useState, useCallback, useRef } from 'react';
-import { useFocusEffect } from 'expo-router';
-import { Animated, StyleSheet, View, Text, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Image, useColorScheme } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import {
+  Animated,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/lib/supabase';
 
