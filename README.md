@@ -1,50 +1,119 @@
-# Welcome to your Expo app 👋
+# Licking County Food Pantry Network
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A mobile application developed with the **Licking County Food Pantry Network** to help community members find nearby food pantries and access up-to-date information about their services.
 
-## Get started
+The app brings pantry locations, operating hours, available food categories, and announcements into a single, accessible mobile experience.
 
-1. Install dependencies
+## Features
 
-   ```bash
-   npm install
-   ```
+### Find Nearby Pantries
 
-2. Start the app
+Explore food pantry locations through an interactive map and search for pantries by name or location.
 
-   ```bash
-   npx expo start
-   ```
+Each pantry provides information including:
 
-In the output, you'll find options to open the app in a
+- Address and location
+- Current operating status
+- Hours of operation
+- Seasonal availability
+- Available food categories
+- Temporary closures
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### Stay Updated
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+The announcements system provides users with current information about:
 
-## Get a fresh project
+- Pantry closures
+- Schedule changes
+- Events
+- General updates
 
-When you're ready, run:
+Announcements can be network-wide or associated with individual pantries.
 
-```bash
-npm run reset-project
+### Real-Time Information
+
+Pantry information is synchronized with the backend using **Supabase Realtime**, allowing updates made by administrators to appear in the app without requiring users to manually refresh.
+
+### Administrative Management
+
+Authorized administrators can manage pantry information directly through the app, including:
+
+- Pantry locations and addresses
+- Operating hours
+- Seasonal availability
+- Inventory information
+- Announcements
+
+## Screenshots
+
+<!-- Add screenshots or a short demo video here -->
+
+## Technology
+
+| Area | Technology |
+|---|---|
+| Mobile Framework | React Native / Expo |
+| Language | TypeScript |
+| Navigation | Expo Router |
+| Backend | Supabase |
+| Database | PostgreSQL |
+| Authentication | Supabase Auth |
+| Maps | React Native Maps |
+| Mapping APIs | Google Maps / Apple Maps |
+| Realtime Data | Supabase Realtime |
+| Testing | Jest |
+
+## Architecture
+
+The application follows a client–backend architecture built around React Native and Supabase.
+
+```text
+┌─────────────────────────────┐
+│      React Native App       │
+│                             │
+│  Home · Map · Announcements │
+│         · Admin             │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│           Supabase          │
+│                             │
+│  PostgreSQL · Auth · RLS    │
+│         · Realtime          │
+└──────────────┬──────────────┘
+               │
+               ▼
+      Pantry Network Data
+
 ```
+The application uses PostgreSQL for structured pantry data, Supabase Auth and Row-Level Security for administrative access, and Supabase Realtime to synchronize changes with connected clients.
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## System Documentation
 
-## Learn more
+For detailed technical documentation, see:
+```
+SYSTEM_DOCS.md
+```
+The system documentation covers:
+- Development environment setup
+- Application architecture
+- Database schema
+- Key files and components
+- Authentication and admin access
+- Pantry visibility and operating-status logic
+- Realtime data synchronization
+- Utility scripts
+- Deployment and EAS configuration
 
-To learn more about developing your project with Expo, look at the following resources:
+## Project Context
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+This project was developed as a Software Engineering project at Denison University in collaboration with the Licking County Food Pantry Network.
 
-## Join the community
+The project focused on building a practical technology solution for a community partner while applying software engineering principles across mobile development, backend systems, database design, testing, and deployment.
 
-Join our community of developers creating universal apps.
+## Team
+**Bach Nguyen · Taemin Lee · Dev Manghat · Cheryl Nguyen · Hieu Tran**
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## License
+This project was developed for the Licking County Food Pantry Network of Ohio, USA and Denison University.
